@@ -33,6 +33,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -105,8 +106,10 @@ private val DOM_JS = """
 
 class MainActivity : Activity() {
 
-    private class Tab(val web: WebView, val isHome: Boolean, val desktop: Boolean) {
+    // isZ1 = bundled Z1 app tab (always mobile). desktop = per-tab Desktop/Mobile switch (like Fulguris), changeable from Menu.
+    private class Tab(val web: WebView, val isHome: Boolean, val isZ1: Boolean, var desktop: Boolean) {
         var title: String = ""
+        var viewportScript: ScriptHandler? = null
     }
 
     private class UserScript(val asset: String, val origins: Set<String>)
@@ -189,9 +192,12 @@ class MainActivity : Activity() {
     // ---------------- Tabs ----------------
 
     private fun newTab(isHome: Boolean, url: String?) {
-        val desktop = !isHome && Uri.parse(url ?: "").host != APP_HOST
-        val wv = createWebView(isHome, desktop)
-        tabs.add(Tab(wv, isHome, desktop))
+        val isZ1 = !isHome && Uri.parse(url ?: "").host == APP_HOST
+        val desktop = !isHome && !isZ1          // new web tabs start in desktop mode; toggle in Menu
+        val wv = createWebView(isHome, isZ1)
+        val tab = Tab(wv, isHome, isZ1, desktop)
+        tabs.add(tab)
+        if (!isHome) applyDesktop(tab)
         content.addView(wv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (isHome) {
             wv.loadDataWithBaseURL("https://zen.home/", homeHtml(), "text/html", "utf-8", null)
@@ -267,7 +273,11 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu() {
+        val ct = tabs[cur]
+        val deskLabel = if (ct.isHome || ct.isZ1) "Desktop site (not for this tab)"
+            else if (ct.desktop) "Desktop site: ON  (tap = mobile)" else "Desktop site: OFF  (tap = desktop)"
         val items = arrayOf(
+            deskLabel,
             "DOM report (current tab)",
             "X selector self-test (current tab)",
             "Bridge test (hidden fetch)",
@@ -277,14 +287,15 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setItems(items) { _, i ->
                 when (i) {
-                    0 -> domReport()
-                    1 -> xSelfTest()
-                    2 -> bridgeTest()
-                    3 -> {
+                    0 -> toggleDesktop()
+                    1 -> domReport()
+                    2 -> xSelfTest()
+                    3 -> bridgeTest()
+                    4 -> {
                         val u = tabs[cur].web.url
                         if (u != null) copy(u)
                     }
-                    4 -> {
+                    5 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
                         WebStorage.getInstance().deleteAllData()
@@ -328,15 +339,56 @@ class MainActivity : Activity() {
 
     // ---------------- WebView ----------------
 
+    // Mobile UA = system WebView UA without the "Build/..; wv" marker (same trick Fulguris uses)
+    private fun mobileUa(): String {
+        return Regex(" Build/.+; wv").replace(WebSettings.getDefaultUserAgent(this), "")
+    }
+
+    // Applies the tab's desktop/mobile state: UA, viewport mode, and the desktop viewport script.
+    private fun applyDesktop(t: Tab) {
+        val s = t.web.settings
+        if (t.desktop) {
+            s.userAgentString = desktopUa()
+            s.useWideViewPort = true
+            s.loadWithOverviewMode = true
+            s.setSupportZoom(true)
+            s.builtInZoomControls = true
+            s.displayZoomControls = false
+            if (t.viewportScript == null && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                t.viewportScript = WebViewCompat.addDocumentStartJavaScript(t.web, VIEWPORT_JS, setOf("*"))
+            }
+        } else {
+            s.userAgentString = if (t.isZ1) WebSettings.getDefaultUserAgent(this) else mobileUa()
+            s.useWideViewPort = false
+            s.loadWithOverviewMode = false
+            val h = t.viewportScript
+            if (h != null) {
+                h.remove()
+                t.viewportScript = null
+            }
+        }
+    }
+
+    private fun toggleDesktop() {
+        val t = tabs[cur]
+        if (t.isHome || t.isZ1) {
+            toast("Not available for this tab")
+            return
+        }
+        t.desktop = !t.desktop
+        applyDesktop(t)
+        t.web.reload()
+        toast(if (t.desktop) "Desktop site: ON" else "Desktop site: OFF (mobile)")
+    }
+
     private fun desktopUa(): String {
         val v = Regex("Chrome/([0-9.]+)").find(WebSettings.getDefaultUserAgent(this))?.groupValues?.get(1)
             ?: "120.0.0.0"
         return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$v Safari/537.36"
     }
 
-    private fun installScripts(wv: WebView, desktop: Boolean) {
+    private fun installScripts(wv: WebView) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
-        if (desktop) WebViewCompat.addDocumentStartJavaScript(wv, VIEWPORT_JS, setOf("*"))
         for (s in userScripts) {
             val code = try {
                 assets.open(s.asset).bufferedReader().use { it.readText() }
@@ -348,7 +400,7 @@ class MainActivity : Activity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(isHome: Boolean, desktop: Boolean): WebView {
+    private fun createWebView(isHome: Boolean, isZ1: Boolean): WebView {
         val wv = WebView(this)
         wv.setBackgroundColor(Color.BLACK)
         val s = wv.settings
@@ -363,23 +415,11 @@ class MainActivity : Activity() {
             s.loadWithOverviewMode = false
             wv.addJavascriptInterface(HomeBridge(), "Z")
         } else {
-            if (desktop) {
-                // Desktop mode: Windows Chrome UA + desktop-width viewport (X, Telegram, etc.)
-                s.userAgentString = desktopUa()
-                s.useWideViewPort = true
-                s.loadWithOverviewMode = true
-                s.setSupportZoom(true)
-                s.builtInZoomControls = true
-                s.displayZoomControls = false
-            } else {
-                // Mobile mode: bundled Z1 app
-                s.useWideViewPort = false
-                s.loadWithOverviewMode = false
-            }
+            // UA / viewport (desktop or mobile) is applied per tab by applyDesktop(tab)
             CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
-            installScripts(wv, desktop)
-            // X session bridge: ONLY the bundled Z1 tab (mobile mode, appassets host). Never x.com / other sites.
-            if (!desktop) wv.addJavascriptInterface(Z1Bridge(wv), "ZenX")
+            installScripts(wv)
+            // X session bridge: ONLY the bundled Z1 tab. Never x.com / other sites.
+            if (isZ1) wv.addJavascriptInterface(Z1Bridge(wv), "ZenX")
         }
 
         wv.webViewClient = object : WebViewClient() {
@@ -391,7 +431,7 @@ class MainActivity : Activity() {
                 if (isHome) return true // home page never navigates away
                 val sch = request.url.scheme ?: return true
                 if (!(sch == "http" || sch == "https")) return true // ignore other schemes
-                if (!desktop && request.url.host != APP_HOST) {
+                if (isZ1 && request.url.host != APP_HOST) {
                     // link clicked inside Z1 -> open it in a desktop tab (X etc.)
                     openUrl(request.url.toString(), true)
                     return true
@@ -401,7 +441,8 @@ class MainActivity : Activity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 // Fallback when document-start scripts are unsupported on this WebView
-                if (!isHome && !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                val tb = tabs.firstOrNull { it.web === view }
+                if (tb != null && tb.desktop && !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                     view.evaluateJavascript(VIEWPORT_JS, null)
                 }
             }
