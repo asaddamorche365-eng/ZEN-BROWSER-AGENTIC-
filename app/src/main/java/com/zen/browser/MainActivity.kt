@@ -33,7 +33,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
-import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -46,7 +45,8 @@ private const val X_URL = "https://x.com/home"
 private const val APP_HOST = "appassets.androidplatform.net"
 private const val Z1_URL = "https://$APP_HOST/assets/z1/index.html"   // Z1 is bundled inside the app (assets/z1)
 private const val TG_URL = "https://web.telegram.org/"
-private const val DESKTOP_WIDTH = 1024                         // desktop layout width in CSS px
+// Desktop mode = same system as Fulguris: desktop UA + wide viewport + injected meta viewport at N% of the real width (Fulguris default 200)
+private const val DESKTOP_WIDTH_PERCENT = 200
 // X bridge (hidden background WebViews used by Z1)
 private const val XREADER_ASSET = "zenx/xreader.js"             // app/src/main/assets/zenx/xreader.js (all X selectors live there)
 private const val HIDDEN_PARALLEL = 2                          // max hidden WebViews at once (1 = lighter on phone)
@@ -57,30 +57,41 @@ private const val SEARCH_TIMEOUT_MS = 30000L
 private const val SETTLE_MS = 700L                             // extra wait after the tweet/profile appears, so parents/stats finish rendering
 // -----------------------------------------------------
 
-// Forces a desktop-width viewport so sites (X etc.) serve their desktop layout and DOM.
-private val VIEWPORT_JS = """
+// Meta-viewport injector (port of Fulguris SetMetaViewport.js, CPAL-1.0: https://github.com/Slion/Fulguris)
+private val SET_VIEWPORT_JS = """
 (function () {
-  var W = $DESKTOP_WIDTH;
-  var mo = null;
-  function apply() {
-    var head = document.head || document.documentElement;
-    if (!head) return;
-    var m = document.querySelector('meta[name="viewport"]');
-    if (!m) {
-      m = document.createElement('meta');
-      m.setAttribute('name', 'viewport');
-      head.appendChild(m);
-    }
-    var s = Math.min(1, (window.screen.width || W) / W);
-    var c = 'width=' + W + ', initial-scale=' + s + ', minimum-scale=' + (s / 2) + ', maximum-scale=5, user-scalable=yes';
-    if (m.getAttribute('content') !== c) m.setAttribute('content', c);
+  'use strict';
+  var pct = @@WIDTH@@;
+  function viewportContent(w) {
+    var cw = (w * pct) / 100;
+    return 'width=' + cw + ', user-scalable=1, initial-scale=' + (w / cw);
   }
-  apply();
-  mo = new MutationObserver(apply);
-  mo.observe(document, { childList: true, subtree: true });
-  window.addEventListener('load', function () { apply(); if (mo) mo.disconnect(); });
+  function main() {
+    var mine = null;
+    document.querySelectorAll('meta[name="viewport"]').forEach(function (m) {
+      if (m.hasAttribute('data-zen')) { mine = m; } else { m.remove(); }
+    });
+    var head = document.getElementsByTagName('head')[0];
+    if (!head) return;
+    var orig = window.innerWidth;
+    if (mine) {
+      orig = parseFloat(mine.getAttribute('data-zen')) || orig;
+    } else {
+      mine = document.createElement('meta');
+      mine.setAttribute('name', 'viewport');
+    }
+    mine.setAttribute('content', viewportContent(orig));
+    mine.setAttribute('data-zen', orig);
+    head.appendChild(mine);
+  }
+  if (!window.__zenVpInit) {
+    window.__zenVpInit = true;
+    window.addEventListener('resize', main);
+    window.addEventListener('load', main);
+  }
+  main();
 })();
-""".trimIndent()
+"""
 
 // Quick DOM check: lists data-testid values found on the page (use on x.com to verify desktop DOM).
 private val DOM_JS = """
@@ -109,7 +120,6 @@ class MainActivity : Activity() {
     // isZ1 = bundled Z1 app tab (always mobile). desktop = per-tab Desktop/Mobile switch (like Fulguris), changeable from Menu.
     private class Tab(val web: WebView, val isHome: Boolean, val isZ1: Boolean, var desktop: Boolean) {
         var title: String = ""
-        var viewportScript: ScriptHandler? = null
     }
 
     private class UserScript(val asset: String, val origins: Set<String>)
@@ -344,28 +354,29 @@ class MainActivity : Activity() {
         return Regex(" Build/.+; wv").replace(WebSettings.getDefaultUserAgent(this), "")
     }
 
-    // Applies the tab's desktop/mobile state: UA, viewport mode, and the desktop viewport script.
+    // Applies the tab's desktop/mobile state (UA + viewport mode). The meta viewport itself is injected by applyDesktopView().
     private fun applyDesktop(t: Tab) {
         val s = t.web.settings
         if (t.desktop) {
             s.userAgentString = desktopUa()
             s.useWideViewPort = true
-            s.loadWithOverviewMode = true
+            s.loadWithOverviewMode = false
             s.setSupportZoom(true)
             s.builtInZoomControls = true
             s.displayZoomControls = false
-            if (t.viewportScript == null && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                t.viewportScript = WebViewCompat.addDocumentStartJavaScript(t.web, VIEWPORT_JS, setOf("*"))
-            }
         } else {
             s.userAgentString = if (t.isZ1) WebSettings.getDefaultUserAgent(this) else mobileUa()
             s.useWideViewPort = false
             s.loadWithOverviewMode = false
-            val h = t.viewportScript
-            if (h != null) {
-                h.remove()
-                t.viewportScript = null
-            }
+        }
+    }
+
+    // Same as Fulguris applyDesktopModeIfNeeded(): called on page start / finish
+    private fun applyDesktopView(view: WebView, desktop: Boolean) {
+        view.settings.useWideViewPort = false
+        if (desktop) {
+            view.settings.useWideViewPort = true
+            view.evaluateJavascript(SET_VIEWPORT_JS.replace("@@WIDTH@@", DESKTOP_WIDTH_PERCENT.toString()), null)
         }
     }
 
@@ -440,11 +451,14 @@ class MainActivity : Activity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                // Fallback when document-start scripts are unsupported on this WebView
                 val tb = tabs.firstOrNull { it.web === view }
-                if (tb != null && tb.desktop && !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                    view.evaluateJavascript(VIEWPORT_JS, null)
-                }
+                if (tb != null && tb.desktop) applyDesktopView(view, true)
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                // Fulguris applies desktop mode again here: the page head may not exist yet at start
+                val tb = tabs.firstOrNull { it.web === view }
+                if (tb != null && tb.desktop) applyDesktopView(view, true)
             }
         }
 
@@ -678,12 +692,9 @@ class MainActivity : Activity() {
         s.mediaPlaybackRequiresUserGesture = true
         s.userAgentString = desktopUa()
         s.useWideViewPort = true
-        s.loadWithOverviewMode = true
+        s.loadWithOverviewMode = false
         s.blockNetworkImage = HIDDEN_BLOCK_IMAGES
         CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(wv, VIEWPORT_JS, setOf("*"))
-        }
         wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val u = request.url
@@ -692,9 +703,11 @@ class MainActivity : Activity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                    view.evaluateJavascript(VIEWPORT_JS, null)
-                }
+                applyDesktopView(view, true)
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                applyDesktopView(view, true)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
