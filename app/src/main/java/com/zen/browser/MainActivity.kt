@@ -5,15 +5,20 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -115,6 +120,13 @@ private val DOM_JS = """
 })();
 """.trimIndent()
 
+// WebView that keeps running when the app is minimized: the window is always reported as visible to Chromium
+class KeepAliveWebView(context: Context) : WebView(context) {
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        if (visibility != View.GONE) super.onWindowVisibilityChanged(View.VISIBLE)
+    }
+}
+
 class MainActivity : Activity() {
 
     // isZ1 = bundled Z1 app tab (always mobile). desktop = per-tab Desktop/Mobile switch (like Fulguris), changeable from Menu.
@@ -164,6 +176,64 @@ class MainActivity : Activity() {
         setContentView(root)
 
         newTab(true, null)
+        startBackground()
+    }
+
+    // ---------------- Background running ----------------
+
+    private fun bgPrefs() = getSharedPreferences("zen_bridge", Context.MODE_PRIVATE)
+
+    private fun bgEnabled(): Boolean = bgPrefs().getBoolean("bg_on", true)
+
+    private fun startBackground() {
+        if (!bgEnabled()) return
+        // 1) notification permission (Android 13+): needed only so the "running" notification is visible
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 11)
+        } else {
+            askBatteryOnce()
+        }
+        // 2) the foreground service itself
+        try {
+            val i = Intent(this, KeepAliveService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
+        } catch (e: Exception) {
+            toast("Background service could not start")
+        }
+    }
+
+    private fun stopBackground() {
+        try {
+            stopService(Intent(this, KeepAliveService::class.java))
+        } catch (e: Exception) {
+        }
+    }
+
+    // asks once to be excluded from battery optimization (system dialog), so Android does not freeze the app
+    private fun askBatteryOnce() {
+        if (bgPrefs().getBoolean("batt_asked", false)) return
+        bgPrefs().edit().putBoolean("batt_asked", true).apply()
+        askBattery()
+    }
+
+    private fun askBattery() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                i.data = Uri.parse("package:" + packageName)
+                startActivity(i)
+            } else {
+                toast("Battery: already unrestricted")
+            }
+        } catch (e: Exception) {
+            toast("Open Settings > Battery and set ZEN BROWSER to Unrestricted")
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 11) askBatteryOnce()   // whatever the answer was, continue with the battery question
     }
 
     // ---------------- UI ----------------
@@ -292,7 +362,9 @@ class MainActivity : Activity() {
             "X selector self-test (current tab)",
             "Bridge test (hidden fetch)",
             "Copy URL",
-            "Clear cookies & site data"
+            "Clear cookies & site data",
+            if (bgEnabled()) "Background run: ON  (tap = off)" else "Background run: OFF  (tap = on)",
+            "Battery: allow unrestricted"
         )
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setItems(items) { _, i ->
@@ -305,6 +377,13 @@ class MainActivity : Activity() {
                         val u = tabs[cur].web.url
                         if (u != null) copy(u)
                     }
+                    6 -> {
+                        val on = !bgEnabled()
+                        bgPrefs().edit().putBoolean("bg_on", on).apply()
+                        if (on) startBackground() else stopBackground()
+                        toast(if (on) "Background run: ON" else "Background run: OFF")
+                    }
+                    7 -> askBattery()
                     5 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
@@ -412,7 +491,7 @@ class MainActivity : Activity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(isHome: Boolean, isZ1: Boolean): WebView {
-        val wv = WebView(this)
+        val wv = KeepAliveWebView(this)
         wv.setBackgroundColor(Color.BLACK)
         val s = wv.settings
         s.javaScriptEnabled = true
@@ -684,7 +763,7 @@ class MainActivity : Activity() {
     // It is added UNDER the visible tabs (index 0) at full size so X lays out and renders normally.
     @SuppressLint("SetJavaScriptEnabled")
     private fun createHiddenWebView(onFail: (String) -> Unit): WebView {
-        val wv = WebView(this)
+        val wv = KeepAliveWebView(this)
         wv.setBackgroundColor(Color.BLACK)
         val s = wv.settings
         s.javaScriptEnabled = true
@@ -991,9 +1070,25 @@ function s(){var q=document.getElementById('q').value.trim();if(q)Z.search(q);re
     override fun onPause() {
         super.onPause()
         CookieManager.getInstance().flush()
+        keepWebViewsRunning()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        keepWebViewsRunning()
+    }
+
+    // WebViews must keep running (timers, rendering, network) while the app is minimized
+    private fun keepWebViewsRunning() {
+        if (!bgEnabled()) return
+        for (t in tabs) {
+            t.web.onResume()
+            t.web.resumeTimers()
+        }
     }
 
     override fun onDestroy() {
+        stopBackground()
         hiddenQueue.clear()
         for (r in ArrayList(hiddenActive)) r.abort()
         hiddenActive.clear()
