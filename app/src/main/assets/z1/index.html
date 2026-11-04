@@ -2316,7 +2316,7 @@ html.z1-ai-ui-off #z1-float,html.z1-ai-ui-off #z1-speech-bubble,html.z1-ai-ui-of
 
 
 
-    <div class="setting-block"><span class="field-label">// TONE · GRAMMAR · BIG REPLY · CUSTOM · STYLE</span><div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;">These live in the <b>Engine</b> tab now (same settings for the X engine and the file generator).</div></div>
+    <div id="zl-set-engine"></div>
     <div class="setting-block">
       <span class="field-label">// FEATURES</span>
       <div>
@@ -2484,44 +2484,6 @@ html.z1-ai-ui-off #z1-float,html.z1-ai-ui-off #z1-speech-bubble,html.z1-ai-ui-of
         <div class="profile-badge"><span style="font-weight:700;">𝕏</span> Connected via X</div>
       </div>
       </div><!-- /z-index:1 -->
-    </div>
-
-    <!-- Z1EN TF Extension Section -->
-    <div class="profile-section-label" style="margin-bottom:6px;">Z1EN TF Extension</div>
-    <div class="z1tf-section">
-      <div class="z1tf-section-title">📁 TELEGRAM FILE COLLECTOR</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;font-family:'Space Mono',monospace;">
-        Install Z1EN TF extension. Open it and<br>paste your <strong>Unique Code</strong> below to connect.
-      </div>
-      <!-- Unique Code box -->
-      <div class="z1tf-code-box">
-        <div>
-          <div style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:3px;">YOUR UNIQUE CODE</div>
-          <div class="z1tf-code-val" id="z1tf-profile-code">------</div>
-        </div>
-        <button class="z1tf-copy-btn" onclick="copyZ1TFCode()">Copy</button>
-      </div>
-      <!-- Connection status -->
-      <div class="z1tf-status-row">
-        <div class="z1tf-status-dot" id="z1tf-profile-dot"></div>
-        <span id="z1tf-profile-status">Extension not connected</span>
-      </div>
-      <!-- Regen code button -->
-      <button class="z1tf-regen-btn" onclick="regenZ1TFCode()">↺ Regenerate Code</button>
-    </div>
-
-    <!-- Modes -->
-    <div class="profile-section-label">Modes</div>
-    <div id="modes-wrap" style="display:flex;flex-direction:column;gap:2px;margin-bottom:10px;">
-      <div class="profile-row" style="cursor:default;" id="mode-row-psu">
-        <div class="profile-row-left"><span class="profile-row-icon"><svg width="20" height="20" viewBox="0 0 56 56" style="display:inline-block;vertical-align:middle;flex-shrink:0;"><defs><radialGradient id="mi-g4" cx="50%" cy="50%"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#064e3b"/></radialGradient><filter id="mi-glow4"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="28" cy="28" r="26" fill="#0d0d1a" stroke="#10b981" stroke-width="2"/><path d="M10,28 Q28,12 46,28 Q28,44 10,28 Z" fill="#064e3b" stroke="#10b981" stroke-width="1.2" filter="url(#mi-glow4)"/><circle cx="28" cy="28" r="8" fill="url(#mi-g4)"/><circle cx="28" cy="28" r="4" fill="#022c22"/><circle cx="30" cy="25" r="2" fill="white" opacity="0.7"/><line x1="20" y1="20" x2="18" y2="16" stroke="#10b981" stroke-width="1.2" opacity="0.6"/><line x1="28" y1="17" x2="28" y2="12" stroke="#10b981" stroke-width="1.2" opacity="0.6"/><line x1="36" y1="20" x2="38" y2="16" stroke="#10b981" stroke-width="1.2" opacity="0.6"/></svg></span> P.S.U</div>
-        <button class="profile-toggle" id="mode-toggle-psu" onclick="toggleMode('psu',this)"><div class="profile-toggle-knob"></div></button>
-      </div>
-      <!-- Z.1-G Toggle -->
-      <div class="profile-row" style="cursor:default;display:none;" id="mode-row-z1g">
-        <div class="profile-row-left"><span class="profile-row-icon"><svg width="20" height="20" viewBox="0 0 56 56" style="display:inline-block;vertical-align:middle;flex-shrink:0;"><defs><radialGradient id="mi-z1g" cx="50%" cy="50%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#4c1d95"/></radialGradient><filter id="mi-glow-z1g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="28" cy="28" r="26" fill="#0d0d1a" stroke="#7c3aed" stroke-width="2"/><text x="28" y="34" text-anchor="middle" font-size="16" font-family="Space Mono,monospace" fill="url(#mi-z1g)" filter="url(#mi-glow-z1g)" font-weight="700">G</text></svg></span> Z .1 - G</div>
-        <button class="profile-toggle" id="profile-z1g-toggle" onclick="toggleProfileZ1G(this)"><div class="profile-toggle-knob"></div></button>
-      </div>
     </div>
 
     <!-- Preferences -->
@@ -5542,7 +5504,10 @@ function _tsToTimeStr(ts){ if(!ts) return null; const d=new Date(ts); return Str
 function undoDone(id){ const p=posts.find(x=>x.id===id); if(!p) return; p.done=false; _unrecordDone(p); try{ window.zxQueueUndone&&window.zxQueueUndone(p.link); }catch(e){} save(); renderAll(); }
 
 // ── SESSION ───────────────────────────────────────────────────
-function setSession(name){ document.getElementById('session-label').textContent=name; }
+function setSession(name){
+  try{ if(/^@?me$/i.test(String(name||'').trim())){ var _p=JSON.parse(localStorage.getItem('zl_profile')||'{}'); if(_p.xUsername) name='@'+_p.xUsername; } }catch(e){}
+  document.getElementById('session-label').textContent=name;
+}
 async function endSession(){
   if(!activeFileId){ showScreen(fileQueue.length?'dashboard':'upload'); return; }
   const f=fileQueue.find(x=>x.id===activeFileId);
@@ -6307,9 +6272,11 @@ function loadProfileData(){
   const savedUser = (() => { try { return JSON.parse(localStorage.getItem(PROFILE_USER_KEY)); } catch { return null; } })();
   const sessionLabel = document.getElementById('session-label');
   const sessionName  = sessionLabel ? sessionLabel.textContent.replace('No Session','').trim() : '';
-  const displayName  = (savedUser && savedUser.name) || sessionName || 'User';
   const authUser = _loadAuthUser();
-  const displayUser  = authUser ? '@'+authUser.xUsername : (savedUser && savedUser.username) || (sessionName ? '@'+sessionName.toLowerCase().replace(/\s/g,'') : '@user');
+  const _xh = (authUser && authUser.xUsername && authUser.xUsername !== 'me') ? String(authUser.xUsername).replace(/^@/, '') : '';
+  const _cleanN = n => (n && String(n).replace(/^@/, '').trim().toLowerCase() !== 'me') ? String(n).replace(/^@/, '').trim() : '';
+  const displayName  = _xh || _cleanN(savedUser && savedUser.name) || _cleanN(sessionName) || 'User';
+  const displayUser  = _xh ? '@'+_xh : (authUser && authUser.xUsername && authUser.xUsername !== 'me') ? '@'+authUser.xUsername : (savedUser && savedUser.username) || (sessionName ? '@'+sessionName.toLowerCase().replace(/\s/g,'') : '@user');
   document.getElementById('profile-display-name').textContent = displayName;
   document.getElementById('profile-display-username').textContent = displayUser;
   // Update profile badges with X + TG info
@@ -10553,7 +10520,9 @@ _applyHeaderBgConfig({});
 // ══════════════════════════════════════════════════════════
 (function initNavHighlight() {
   const navMap = {
-    'home-btn':        ['upload-screen','dashboard-screen','main-screen'],
+    'home-btn':        ['home-screen','upload-screen','dashboard-screen','main-screen'],
+    'zstats-btn':      ['zstats-screen'],
+    'mmenu-engine':    ['engine-screen'],
     'discover-btn':    ['discover-screen'],
     'hist-btn':        ['history-screen'],
     'owner-btn':       ['owner-screen'],
