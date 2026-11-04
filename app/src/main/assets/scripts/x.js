@@ -9,8 +9,10 @@
   // ---------------- settings (localStorage of x.com) ----------------
   var CK = 'zenEngCfg', RK = 'zenEngReplied';
   var DEF = { sea: false, fed: false, auto: false, like: false, likePct: 100, target: false, targetKw: '',
-    tone: 'Positive', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
-    ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '' };
+    tone: 'Smart', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
+    ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '',
+    grammar: {}, bigOn: false, bigWords: '', bigTone: 'Smart', customTone: '', customWords: '',
+    tUi: 'classic', tMode: 'fast', tPer: 40, tBreakEvery: 50, tBreakMin: 30, tBreakMax: 50 };
   // settings + runtime toggles live in the app (SharedPreferences) so the Engine settings page and this panel share them
   function loadCfg() {
     var c = {};
@@ -292,37 +294,77 @@
   // ---------------- AI (native bridge) ----------------
   var cbs = {}, cbN = 0;
   window.__zenEngCb = function (id, json) { var f = cbs[id]; delete cbs[id]; if (f) { try { f(JSON.parse(json)); } catch (e) { f({ ok: false, error: 'bad_json' }); } } };
+  // ---- tone system (same structure as the Z EX extension) ----
+  // Extension prompts live on its server, so the instruction text per tone is written here. Everything else is the same:
+  // 15 tones, Auto = random pool without repeating the same tone twice, Use Grammar per tone (default ON),
+  // Big Reply (word count + its own tone overrides the normal tone), Custom tone (own prompt + word limit).
+  var TONE_LIST = ['Smart', 'Funny', 'Professional', 'Supportive', 'Witty', 'Curious', 'Short', 'Human', 'Alpha', 'Positive', 'PositiveQuestion', 'Helpful', 'Master', 'Custom', 'Auto'];
+  var AUTO_POOL = ['Smart', 'Witty', 'Human', 'Alpha', 'Curious', 'Positive', 'PositiveQuestion', 'Helpful'];
+  var lastAuto = null;
+  function resolveAuto() {
+    var av = AUTO_POOL.filter(function (t) { return t !== lastAuto; });
+    lastAuto = av[Math.floor(Math.random() * av.length)]; return lastAuto;
+  }
   var TONES = {
-    'Positive': 'React positively to the post. Short, natural, believable.',
-    'Sarcasm': 'Light dry sarcasm based on the post. Not rude, not forced.',
-    'Love': 'Warm natural reaction to the post. Short and not cringe.',
-    'Helpful': 'Give a quick useful response related to the post. No extra talk.',
-    'Question': 'Ask one short natural question about the post.',
-    'Very Short': '1-3 word raw reaction to the post only.',
-    'Positive & Question': 'Positive reaction + one short natural question.',
-    'Praise': 'Short genuine praise based on the post. Keep it real.',
-    'Angry': 'Short frustrated reaction to the post. Controlled tone.',
-    'Thank You': 'Simple natural thanks based on the post context.',
-    'Negative / No': 'Short calm disagreement or refusal. No aggression.',
-    'Disagree': 'Direct but calm pushback related to the post.',
-    'GenZ': 'You are a sharp, emotionally aware Gen Z person. Work out what the post really is (joke, win, question, emotional) and reply like a real person texting. Very short, lowercase is fine, no cringe slang overload.'
+    'Smart': 'Add a sharp, insightful point that shows you understood the post. Natural, confident, no filler.',
+    'Funny': 'Make a quick, genuinely funny remark based on the post. Light humour, not forced, not rude.',
+    'Professional': 'Reply in a polished, respectful, professional voice. Clear and to the point.',
+    'Supportive': 'Reply warmly and encouragingly, backing the author up. Sincere, not over the top.',
+    'Witty': 'Reply with clever wordplay or a dry witty twist on the post. Short and sharp.',
+    'Curious': 'Ask one thoughtful, specific question about the post that invites an answer.',
+    'Short': 'Reply with a very short reaction, 1 to 8 words, based on the post.',
+    'Human': 'Reply like a real person casually typing on a phone. Relaxed, a little imperfect, believable.',
+    'Alpha': 'Reply with calm, confident, direct energy. Bold take, no hedging, no cringe.',
+    'Positive': 'React positively and genuinely to the post. Natural and believable.',
+    'PositiveQuestion': 'Give a short positive reaction and then ask one short natural question.',
+    'Helpful': 'Add one quick, genuinely useful point or tip related to the post. No extra talk.',
+    'Master': 'Reply like an expert who has seen it all: concise, authoritative, adds real value.'
   };
-  function buildPrompt(post) {
-    var p = 'Post:\n' + post + '\n\n' + (TONES[cfg.tone] || TONES.Positive) +
-      ' Write ONE short reply in the same language as the post. No hashtags, no links, no emojis spam, no quotes around the reply. Reply text only.';
-    if (cfg.style && cfg.style.trim()) p += ' Use this replying style: ' + cfg.style.trim();
+  function pickTone() {
+    var t = TONE_LIST.indexOf(cfg.tone) >= 0 ? cfg.tone : 'Smart';
+    if (t === 'Auto') t = resolveAuto();
+    if (cfg.bigOn && TONES[cfg.bigTone]) t = cfg.bigTone;       // Big Reply mode: its own tone wins (like the extension)
+    return t;
+  }
+  function buildPrompt(post, tone) {
+    var big = !!cfg.bigOn && String(cfg.bigWords || '').trim();
+    var p = 'Post:\n' + post + '\n\n';
+    if (tone === 'Custom' && String(cfg.customTone || '').trim()) p += 'Reply instructions: ' + cfg.customTone.trim() + ' ';
+    else p += 'Tone: ' + (TONES[tone] || TONES.Smart) + ' ';
+    if (big) p += 'Write a longer reply of about ' + String(cfg.bigWords).trim() + ' words. ';
+    else if (tone === 'Custom' && String(cfg.customWords || '').trim()) p += 'Keep it within ' + String(cfg.customWords).trim() + ' words. ';
+    else if (tone !== 'Short') p += 'Keep it short (under 30 words). ';
+    p += 'Write ONE reply in the same language as the post. No hashtags, no links, no emoji spam, no quotes around the reply. Reply text only.';
+    var useGrammar = !(cfg.grammar && cfg.grammar[tone] === false);
+    p += useGrammar ? ' Use correct grammar and punctuation.' : ' Write naturally like real typing: relaxed punctuation, grammar fixing is OFF.';
+    if (cfg.style && cfg.style.trim()) p += ' Use this replying style (your voice): ' + cfg.style.trim();
     if (cfg.keyword && cfg.keyword.trim()) p += ' Include this keyword naturally: ' + cfg.keyword.trim();
     return p;
   }
-  function gen(post) {
+  function gen(post, tone) {
     return new Promise(function (resolve, reject) {
       if (!window.ZenEng) { reject(new Error('Bridge missing (update app)')); return; }
       var id = 'g' + (++cbN), done = false;
       var to = setTimeout(function () { if (!done) { done = true; delete cbs[id]; reject(new Error('AI timeout')); } }, 45000);
       cbs[id] = function (r) { if (done) return; done = true; clearTimeout(to); if (r && r.ok && r.text) resolve(r.text); else reject(new Error((r && r.error) || 'AI failed')); };
-      try { window.ZenEng.gen(buildPrompt(post), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
+      try { window.ZenEng.gen(buildPrompt(post, tone), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
     });
   }
+  // ---- timing (CLASSIC = old pause min/max, ADVANCED = FAST / SLOW / CUSTOM like the extension's Timing Hub) ----
+  var T_FAST = { steps: [1, 2], next: [5, 7], every: 50, len: [30, 50] };
+  var T_SLOW = { steps: [3, 5], next: [12, 18], every: 25, len: [75, 125] };
+  function timing() {
+    if (cfg.tUi !== 'advanced') return { steps: null, next: [cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)], every: 0, len: [0, 0] };
+    if (cfg.tMode === 'slow') return T_SLOW;
+    if (cfg.tMode !== 'custom') return T_FAST;
+    var T = Math.max(5, Number(cfg.tPer) || 40), s = Math.min(20, Math.max(1, T * 0.06));
+    var b1 = Number(cfg.tBreakMin) || 0, b2 = Number(cfg.tBreakMax) || 0;
+    return { steps: [Math.round(s * 7) / 10, Math.round(s * 13) / 10], next: [Math.max(2, Math.round(T * 0.5)), Math.max(2, Math.round(T))],
+      every: Math.max(0, Math.floor(Number(cfg.tBreakEvery) || 0)), len: [Math.min(b1, b2), Math.max(b1, b2)] };
+  }
+  async function stepWait() { var t = timing(); if (t.steps) await sleep(rnd(t.steps[0], t.steps[1]) * 1000); }
+  // ---- history log (stored in the app, shown in Z1 → History / Stats) ----
+  function logEv(o) { try { if (window.ZenEng && window.ZenEng.logEvent) { o.t = Date.now(); window.ZenEng.logEvent(JSON.stringify(o)); } } catch (e) {} }
   function cleanReply(t) {
     t = String(t || '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim();
     if (!t || /https?:\/\/|www\./i.test(t)) return '';
@@ -343,6 +385,7 @@
     if (!navigator.onLine) { toast('No internet connection', 'error'); return false; }
     busy.add(a);
     var html = btn.innerHTML; btn.textContent = '...'; btn.disabled = true;
+    var usedTone = '';
     try {
       setStat('Opening reply');
       if (cfg.like && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < cfg.likePct) {
@@ -350,19 +393,22 @@
       }
       var ed = await openReplyBox(a); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
+      await stepWait();
       setStat('Generating reply');
-      var reply = cleanReply(await gen(post)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
+      usedTone = pickTone();
+      var reply = cleanReply(await gen(post, usedTone)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
       if (!(await insertText(ed, reply))) throw new Error('Text did not land in the box');
       ourTexts[normT(reply)] = 1;
       var posted = false;
-      if (cfg.auto) { setStat('Posting'); posted = await postReply(liveEditor() || ed); }
+      if (cfg.auto) { setStat('Posting'); await stepWait(); posted = await postReply(liveEditor() || ed); }
       btn.textContent = 'DONE'; btn.classList.add('zen-done'); btn.style.opacity = '.6';
       if (posted) { markReplied(sid, eng); stat.done++; }
+      logEv({ k: posted ? 'reply' : 'draft', e: eng, id: sid, a: author(a) || '', p: post.slice(0, 160), r: reply, tone: usedTone });
       toast(posted ? 'Reply posted' : 'Reply drafted — review & tap Reply', 'success');
       return true;
     } catch (err) {
-      if (err && err.off) { skipped[sid] = 1; markReplied(sid, 'off'); btn.remove(); await closeComposer(); toast('Comments off — skipped', 'warn'); }
-      else { btn.innerHTML = html; btn.disabled = false; toast(String((err && err.message) || 'Reply failed'), 'error'); await closeComposer(); }
+      if (err && err.off) { skipped[sid] = 1; markReplied(sid, 'off'); btn.remove(); await closeComposer(); logEv({ k: 'off', e: eng, id: sid, a: author(a) || '' }); toast('Comments off — skipped', 'warn'); }
+      else { logEv({ k: 'error', e: eng, id: sid, a: author(a) || '', m: String((err && err.message) || 'Reply failed').slice(0, 120), tone: usedTone }); btn.innerHTML = html; btn.disabled = false; toast(String((err && err.message) || 'Reply failed'), 'error'); await closeComposer(); }
       return false;
     } finally { busy.delete(a); }
   }
@@ -439,13 +485,19 @@
         if (ok) { emptyReloads = 0; writeRun({ empty: 0 }); }
         if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s2 = statusId(target); if (s2) skipped[s2] = 1; await closeComposer(); await sleep(1200); continue; }
         await waitClose(lastEditor);
-        var pw = rnd(cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)); setStat('Waiting ' + Math.round(pw) + 's'); await sleep(pw * 1000);
+        var tm = timing();
+        var pw = rnd(tm.next[0], Math.max(tm.next[0], tm.next[1])); setStat('Waiting ' + Math.round(pw) + 's'); await sleep(pw * 1000);
+        if (tm.every > 0 && runCount > 0 && runCount % tm.every === 0 && tm.len[1] > 0) {
+          var bl = Math.round(rnd(tm.len[0], Math.max(tm.len[0], tm.len[1])));
+          for (var bq = bl; bq > 0 && cfg.auto; bq--) { setStat('Break ' + bq + 's'); await sleep(1000); }
+        }
       }
       if (!stopMsg && runCount >= cfg.maxRun && cfg.auto) stopMsg = 'Max per run reached';
     } catch (e) { toast(String(e && e.message || e), 'error'); }
     finally {
       autoRunning = false;
       if (!reloading) {
+        logEv({ k: 'run', e: eng, done: stat.done, skip: stat.skip, m: stopMsg || '' });
         setStat(cfg.auto ? 'Stopped' : 'Idle');
         if (stopMsg) { toast(stopMsg + ' - auto stopped', 'success'); setStat(stopMsg); }
         if (cfg.auto && (stopMsg || runCount >= cfg.maxRun)) patchCfg({ auto: false });
