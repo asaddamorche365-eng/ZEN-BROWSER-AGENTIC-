@@ -1003,8 +1003,6 @@ class MainActivity : Activity() {
     //  Result: window.__zenEngCb(callbackId, jsonString)  ->  {ok:true,text} | {ok:false,error}
     // =====================================================================
 
-    private fun isXHost(h: String?): Boolean = h == "x.com" || h == "www.x.com" || h == "twitter.com" || h == "mobile.twitter.com"
-
     private fun openXUrlUi(url: String) {
         if (!isXHost(Uri.parse(url).host)) return
         var idx = -1
