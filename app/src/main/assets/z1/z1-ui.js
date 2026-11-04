@@ -96,7 +96,30 @@
     '.zl-cnt{display:flex;align-items:center;gap:8px;padding:5px 0;font:600 12px DM Sans,sans-serif;color:var(--text)}',
     '.zl-cnt .n{width:34px;text-align:right;font:700 11px Space Mono,monospace;color:var(--muted)}',
     '.zl-cnt .l{width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.zl-seg{display:flex;gap:6px;margin-bottom:12px}'
+    '.zl-seg{display:flex;gap:6px;margin-bottom:12px}',
+    /* Home: file header (Done / All Files / Add) */
+    '.zl-files .dash-header.zl-fh{flex-wrap:wrap;gap:6px}',
+    '.zl-fb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}',
+    /* Home: compact RECENT (3 rows, small text) */
+    '.zl-rechead{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}',
+    '.zl-rechead .zp-lbl{margin-bottom:0!important}',
+    '.zl-more{background:none;border:0;color:var(--accent3);font:700 10px DM Sans,sans-serif;letter-spacing:.3px;padding:2px 0}',
+    '.zl-rec .zl-ev{padding:7px 0}',
+    '.zl-rec .zl-evh{font-size:9px;gap:5px}',
+    '.zl-rec .zl-tag{font-size:8px;padding:1px 6px;border-radius:6px}',
+    '.zl-rec .zl-p{font-size:10.5px;margin-top:3px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}',
+    '.zl-rec .zl-r{font-size:11.5px;margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+    /* Profile sheet: one clean font (DM Sans) instead of mixed mono */
+    '#profile-sheet .profile-username{font:500 13px DM Sans,sans-serif;letter-spacing:.2px;color:var(--muted)}',
+    '#profile-sheet .xp-stats{font:500 12px DM Sans,sans-serif;gap:24px;align-items:baseline}',
+    '#profile-sheet .xp-stats span{display:inline-flex;align-items:baseline;gap:5px}',
+    '#profile-sheet .xp-stats b{font:800 15px DM Sans,sans-serif;color:var(--text);margin:0}',
+    '#profile-sheet .xp-sync{font:600 11px DM Sans,sans-serif;padding:5px 12px;border-radius:10px}',
+    '#profile-sheet .profile-badge{font-family:DM Sans,sans-serif}',
+    '#profile-sheet .profile-section-label{font:800 11px DM Sans,sans-serif;letter-spacing:1.2px}',
+    '#profile-sheet .z1tf-section-title{font:800 12px DM Sans,sans-serif;letter-spacing:1px}',
+    '#profile-sheet .field-label{font:600 12px DM Sans,sans-serif;letter-spacing:.2px;color:var(--muted)}',
+    '#profile-sheet .field-input{font:500 14px DM Sans,sans-serif}'
   ].join('\n');
   document.head.appendChild(css);
 
@@ -115,12 +138,12 @@
   function goHistory() { try { closeMainMenu(); } catch (e) {} showScreen('history'); }
   function goStats() { try { closeMainMenu(); } catch (e) {} showScreen('zstats'); }
   function goProfile() { try { closeMainMenu(); } catch (e) {} if (typeof openProfileSheet === 'function') openProfileSheet(); }
-  function goUpload() { try { closeMainMenu(); } catch (e) {} try { showScreen((typeof fileQueue !== 'undefined' && fileQueue.length) ? 'dashboard' : 'upload'); } catch (x) {} }
-  window.zlGoHome = goHome; window.zlGoHistory = goHistory; window.zlGoStats = goStats;
+  function goFiles() { try { closeMainMenu(); } catch (e) {} try { showScreen('files'); } catch (x) {} }
+  window.zlGoFiles = goFiles; window.zlGoHome = goHome; window.zlGoHistory = goHistory; window.zlGoStats = goStats;
 
   // ---------- back pill: every sub screen gets a "< Home" button at the top (no bottom tab bar any more) ----------
-  var BACK_SCREENS = ['engine-screen', 'history-screen', 'zstats-screen'];
-  var TITLES = { 'engine-screen': 'Engine', 'history-screen': 'History', 'zstats-screen': 'Stats' };
+  var BACK_SCREENS = ['engine-screen', 'history-screen', 'zstats-screen', 'dashboard-screen'];
+  var TITLES = { 'engine-screen': 'Engine', 'history-screen': 'History', 'zstats-screen': 'Stats', 'dashboard-screen': 'All Files' };
   function ensureBack(el) {
     if (!el || el.querySelector('.zl-nav')) return;
     var bar = document.createElement('div'); bar.className = 'zl-nav';
@@ -138,13 +161,18 @@
   function watchBack() {
     if (obs || !window.MutationObserver) return;
     obs = new MutationObserver(function () { markTabs(); });
-    ['engine-screen', 'history-screen', 'zstats-screen'].forEach(function (id) { var el = $(id); if (el) obs.observe(el, { childList: true }); });
+    ['engine-screen', 'history-screen', 'zstats-screen', 'dashboard-screen'].forEach(function (id) { var el = $(id); if (el) obs.observe(el, { childList: true }); });
   }
 
   // wrap showScreen: render the new screens on entry, keep the tab bar in sync
   var _ss = window.showScreen;
   window.showScreen = function (name) {
-    if (name === 'upload' || name === 'dashboard') { name = 'home'; arguments[0] = 'home'; }
+    // 'files' = the All Files tab (the old dashboard screen). Old callers that ask for 'dashboard' / 'upload'
+    // land on Home, except when the user is already on All Files or came from a file opened there.
+    var curEl = document.querySelector('.screen.active'), curId = curEl ? curEl.id : '';
+    if (name === 'files') name = 'dashboard';
+    else if (name === 'upload' || name === 'dashboard') name = (name === 'dashboard' && (curId === 'dashboard-screen' || window.__zlFromFiles)) ? 'dashboard' : 'home';
+    window.__zlFromFiles = (name === 'main') ? (curId === 'dashboard-screen') : false;
     // deep-link z1/index.html#engine: boot routes to Home, send it to Engine once instead
     if (name === 'home' && /#engine/.test(location.hash) && !window.__zlHashDone && window.zlGo) { window.__zlHashDone = 1; window.zlGo('engine'); return; }
     var r = _ss.apply(this, [name]);
@@ -161,37 +189,52 @@
   // ---------- HOME ----------
   function engStatus(c) { return { sea: !!c.sea, fed: !!c.fed }; }
   // ---------- Home + Upload + file queue = one screen ----------
-  var FILE_NODES = [['drop-zone', 'upload-screen'], ['file-input', 'upload-screen'], ['dash-header', 'dashboard-screen', 1], ['coop-session-downloads', 'dashboard-screen'], ['dash-list', 'dashboard-screen']];
-  function fnode(n) { return n[2] ? document.querySelector('#dashboard-screen .dash-header, #hm-files .dash-header') : $(n[0]); }
-  function stashFiles() {   // move the upload / queue nodes back out before home is re-rendered (keeps their listeners)
-    FILE_NODES.forEach(function (n) { var el = fnode(n), host = $(n[1]); if (el && host && !host.contains(el)) host.appendChild(el); });
+  var FILE_NODES = [['drop-zone', 'upload-screen'], ['file-input', 'upload-screen']];
+  function stashFiles() {   // move the upload box back out before home is re-rendered (keeps its listeners)
+    FILE_NODES.forEach(function (n) { var el = $(n[0]), host = $(n[1]); if (el && host && !host.contains(el)) host.appendChild(el); });
   }
   function hasQueue() { try { return typeof fileQueue !== 'undefined' && fileQueue.length > 0; } catch (e) { return false; } }
+  function latestFile() {   // newest uploaded file (ties: the one added last)
+    var q; try { q = fileQueue; } catch (e) { return null; }
+    if (!q || !q.length) return null;
+    var best = q[0], bt = best.uploadedAt || 0;
+    for (var i = 1; i < q.length; i++) { var t = q[i].uploadedAt || 0; if (t >= bt) { best = q[i]; bt = t; } }
+    return best;
+  }
   function mountFiles() {
     var slot = $('hm-files'); if (!slot) return;
     var q = hasQueue();
     FILE_NODES.forEach(function (n) {
-      var el = fnode(n); if (!el) return;
-      if (n[0] === 'dash-header' || n[0] === 'coop-session-downloads' || n[0] === 'dash-list') { if (!q && n[0] !== 'coop-session-downloads') { el.style.display = 'none'; return; } if (n[0] === 'dash-header') el.style.display = 'flex'; if (n[0] === 'dash-list') el.style.display = ''; }
+      var el = $(n[0]); if (!el) return;
       if (n[0] === 'drop-zone') el.style.display = q ? 'none' : '';
       slot.appendChild(el);
     });
-    try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
+    if (q) {   // Home shows ONLY the latest file; everything else lives in the All Files tab
+      var lf = latestFile(), list = $('hm-list');
+      try { if (lf && list && typeof _renderFileCards === 'function') _renderFileCards(list, [lf]); } catch (e) { try { console.warn('z1-ui home file', e); } catch (e2) {} }
+    }
   }
   var qSig = '';
-  setInterval(function () {   // keep the queue live while Home is open
-    var h = $('home-screen'); if (!h || !h.classList.contains('active')) return;
+  setInterval(function () {   // keep the queue live while Home or All Files is open
+    var h = $('home-screen'), d = $('dashboard-screen');
+    var onHome = !!(h && h.classList.contains('active')), onFiles = !!(d && d.classList.contains('active'));
+    if (!onHome && !onFiles) return;
     var sig = ''; try { sig = fileQueue.map(function (f) { return f.id + ':' + (f.posts || []).length + ':' + (f.posts || []).filter(function (p) { return p.done; }).length; }).join('|'); } catch (e) {}
-    if (sig !== qSig) { var first = qSig === '' ; qSig = sig; if (!first || sig) { try { renderHome(); } catch (e) {} } }
+    if (sig !== qSig) { var first = qSig === '' ; qSig = sig; if (!first || sig) { try { if (onFiles) { if (typeof renderDashboard === 'function') renderDashboard(); } else renderHome(); } catch (e) {} } }
   }, 1500);
 
   function renderHome() {
     var el = $('home-screen'); if (!el) return;
     var c = cfgGet(), e = engStatus(c), k = keysState(), lg = xLogged();
     var user = ''; try { user = (jget('zl_profile', {}).xUsername) || (B && B.xUsername && B.xUsername()) || ''; } catch (x) {}
-    var h = hist().filter(function (v) { return v.k === 'reply' || v.k === 'draft' || v.k === 'error' || v.k === 'off'; }).slice(0, 5);
+    var h = hist().filter(function (v) { return v.k === 'reply' || v.k === 'draft' || v.k === 'error' || v.k === 'off'; }).slice(0, 3);
     var rec = h.length ? h.map(evHtml).join('') : '<div class="zp-note" style="margin:0">No replies yet. Start in X, the engine logs every reply here.</div>';
     stashFiles();
+    var q = hasQueue(), nq = 0; try { nq = fileQueue.length; } catch (x2) {}
+    var fhead = q ? '<div class="dash-header zl-fh"><span class="dash-title">// FILE QUEUE</span><div class="zl-fb">' +
+      '<button class="dash-add-btn" id="hm-done" style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.4);color:#4ade80;">✅ Done</button>' +
+      '<button class="dash-add-btn" id="hm-all">📂 All Files' + (nq > 1 ? ' (' + nq + ')' : '') + '</button>' +
+      '<button class="dash-add-btn" id="hm-add">+ Add File</button></div></div><div class="dash-list" id="hm-list"></div>' : '';
     el.innerHTML = '<div class="zp-wrap">' +
       '<div class="zp-h">Z.1 <span style="font:400 9.5px Space Mono,monospace;color:var(--muted)">HOME' + (user ? ' · @' + esc(user) : '') + '</span></div>' +
       '<div style="height:8px"></div>' +
@@ -209,14 +252,20 @@
       '<button class="zl-sc" id="hm-s-sta">' + IC.stats + 'STATS</button>' +
       '<button class="zl-sc" id="hm-s-pro">' + IC.profile + 'PROFILE</button></div>' +
       '<div class="zp-lbl" style="margin:4px 2px 6px">// POST LIST</div>' +
-      '<div class="zl-files" id="hm-files"></div>' +
-      '<div class="zp-card"><div class="zp-lbl">RECENT</div>' + rec + '</div>' +
+      '<div class="zl-files" id="hm-files">' + fhead + '</div>' +
+      '<div class="zp-card zl-rec"><div class="zl-rechead"><div class="zp-lbl">RECENT</div><button class="zl-more" id="hm-more">View all ›</button></div>' + rec + '</div>' +
       '</div>';
     mountFiles();
     $('hm-x').onclick = function () { try { if (B && B.openX) B.openX(); else say('Open the X tab', 'error'); } catch (x) {} };
     $('hm-sea').onclick = function () { var n = !cfgGet().sea; cfgSet({ sea: n }); renderHome(); };
     $('hm-fed').onclick = function () { var n = !cfgGet().fed; cfgSet({ fed: n }); renderHome(); };
     $('hm-keys').onclick = goProfile;
+    $('hm-more').onclick = goHistory;
+    if (q) {
+      $('hm-done').onclick = function () { try { openDoneReview('timeline'); } catch (x) {} };
+      $('hm-all').onclick = goFiles;
+      $('hm-add').onclick = function () { var fi = $('file-input'); if (fi) fi.click(); };
+    }
     $('hm-s-eng').onclick = goEngine; $('hm-s-his').onclick = goHistory; $('hm-s-sta').onclick = goStats; $('hm-s-pro').onclick = goProfile;
   }
 
@@ -475,7 +524,7 @@
     host.innerHTML = '<div class="profile-section-label" style="margin-bottom:6px;">Connections</div>' +
       '<div class="z1tf-section">' +
       '<div class="z1tf-section-title">🔑 X ACCOUNT + API KEYS</div>' +
-      '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.6;font-family:\'Space Mono\',monospace;">Saved on this device only. Used by Z1 and the Engine.</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">Saved on this device only. Used by Z1 and the Engine.</div>' +
       '<div>' + pfBadge(!!k.gem, 'Gemini') + pfBadge(!!k.groq, 'Z1-G / Groq') + pfBadge(!!k.oai, 'OpenAI') + '</div>' +
       pfFld('zl-pf-user', 'X username (without @)', p.xUsername || '', 'text', 'yourhandle') +
       pfFld('zl-pf-gem', 'Gemini API key', k.gem || '', 'password', 'AIza...') +
@@ -562,8 +611,8 @@
     if ($('mmenu-upload')) return;
     var h = $('home-btn'); if (!h || !h.parentNode) return;
     var it = document.createElement('div'); it.className = 'mmenu-item'; it.id = 'mmenu-upload';
-    it.innerHTML = '<div class="mmenu-icon" style="display:flex;align-items:center;justify-content:center;font-size:18px">📁</div><div class="mmenu-text"><div class="mmenu-label">Upload Post List</div><div class="mmenu-sub">Add a .txt file · generate replies</div></div>';
-    it.onclick = goUpload;
+    it.innerHTML = '<div class="mmenu-icon" style="display:flex;align-items:center;justify-content:center;font-size:18px">📁</div><div class="mmenu-text"><div class="mmenu-label">Show All Files</div><div class="mmenu-sub">File queue · add a .txt file</div></div>';
+    it.onclick = goFiles;
     h.parentNode.insertBefore(it, h.nextSibling);
   }
 
