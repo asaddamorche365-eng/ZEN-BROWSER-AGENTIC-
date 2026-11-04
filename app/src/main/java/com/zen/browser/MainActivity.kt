@@ -503,8 +503,8 @@ class MainActivity : Activity() {
     private fun showTabs() {
         sheet("Tabs (${tabs.size})") { list, dlg ->
             tabs.forEachIndexed { i, t ->
-                val label = if (t.isHome) "Home" else t.title.ifEmpty { t.web.url ?: "Tab" }
-                val sub = if (t.isHome) null else t.web.url
+                val label = if (t.isHome) "Home" else if (t.isZ1) "Z.1" else t.title.ifEmpty { t.web.url ?: "Tab" }
+                val sub = if (t.isHome || t.isZ1) null else t.web.url   // Z1 / Home: no internal appassets path
                 sheetRow(list, dlg, if (t.isHome) "\u2302" else if (t.isZ1) "Z" else "\uD83C\uDF10", label, sub, if (i == cur) "OPEN" else null, true) { switchTo(i) }
             }
             sheetLabel(list, "ACTIONS")
@@ -519,7 +519,7 @@ class MainActivity : Activity() {
             sheetLabel(list, "PAGE")
             sheetRow(list, dlg, "\uD83D\uDDA5", "Desktop site", if (canDesk) "Load the desktop version of this page" else "Not available for this tab",
                 if (canDesk) (if (ct.desktop) "ON" else "OFF") else null, ct.desktop) { toggleDesktop() }
-            sheetRow(list, dlg, "\uD83D\uDD17", "Copy URL", "Copy the address of this page", null, false) {
+            if (!ct.isZ1) sheetRow(list, dlg, "\uD83D\uDD17", "Copy URL", "Copy the address of this page", null, false) {
                 val u = tabs[cur].web.url
                 if (u != null) copy(u)
             }
