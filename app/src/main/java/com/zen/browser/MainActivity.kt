@@ -53,7 +53,7 @@ import org.json.JSONTokener
 private const val SEARCH_URL = "https://duckduckgo.com/?q="   // search engine used by the home search box
 private const val X_URL = "https://x.com/home"
 private const val APP_HOST = "appassets.androidplatform.net"
-private const val ENG_URL = "https://$APP_HOST/assets/zenx/engine.html"   // SEA/FED settings page
+private const val ENG_URL = "https://$APP_HOST/assets/z1/index.html#engine"   // Engine settings = a tab inside Z1
 private const val Z1_URL = "https://$APP_HOST/assets/z1/index.html"   // Z1 is bundled inside the app (assets/z1)
 private const val TG_URL = "https://web.telegram.org/"
 // Desktop mode = same system as Fulguris: desktop UA + wide viewport + injected meta viewport at N% of the real width (Fulguris default 200)
@@ -690,6 +690,35 @@ class MainActivity : Activity() {
             runOnUiThread { showEngKeys() }
         }
 
+        // Profile page: keys live natively (the engine reads them from here). Only the Z1 tab has this bridge.
+        @JavascriptInterface
+        fun engKeysGet(): String {
+            val sp = engPrefs()
+            return JSONObject().put("gem", sp.getString("gem", "") ?: "")
+                .put("groq", sp.getString("groq", "") ?: "")
+                .put("oai", sp.getString("oai", "") ?: "").toString()
+        }
+
+        @JavascriptInterface
+        fun engKeysSet(json: String) {
+            try {
+                val j = JSONObject(json)
+                val ed = engPrefs().edit()
+                for (k in arrayOf("gem", "groq", "oai")) if (j.has(k)) ed.putString(k, j.optString(k, "").trim())
+                ed.apply()
+            } catch (e: Exception) {
+            }
+        }
+
+        // Engine history (written by x.js on x.com, read by the Z1 History/Stats tabs)
+        @JavascriptInterface
+        fun histGet(): String = engHistGet()
+
+        @JavascriptInterface
+        fun histClear() {
+            engPrefs().edit().putString("hist", "[]").apply()
+        }
+
         @JavascriptInterface
         fun xLoggedIn(): Boolean = isXLoggedIn()
 
@@ -737,7 +766,9 @@ class MainActivity : Activity() {
     private fun engPrefs() = getSharedPreferences("zen_eng", Context.MODE_PRIVATE)
 
     private val engCfgKeys = arrayOf("sea", "fed", "auto", "like", "likePct", "target", "targetKw", "tone", "style",
-        "keyword", "maxRun", "paceMin", "paceMax", "ageOn", "ageMinMin", "ageMaxMin", "myHandle")
+        "keyword", "maxRun", "paceMin", "paceMax", "ageOn", "ageMinMin", "ageMaxMin", "myHandle",
+        "grammar", "bigOn", "bigWords", "bigTone", "customTone", "customWords",
+        "tUi", "tMode", "tPer", "tBreakEvery", "tBreakMin", "tBreakMax")
 
     private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
 
@@ -754,8 +785,11 @@ class MainActivity : Activity() {
     }
 
     private fun openEngSettings() {
-        val idx = tabs.indexOfFirst { !it.isHome && (it.web.url ?: "") == ENG_URL }
-        if (idx >= 0) switchTo(idx) else newTab(false, ENG_URL)
+        val idx = tabs.indexOfFirst { it.isZ1 }
+        if (idx >= 0) {
+            switchTo(idx)
+            tabs[idx].web.evaluateJavascript("window.zlGo&&window.zlGo('engine')", null)
+        } else newTab(false, ENG_URL)
     }
 
     private fun engDeliver(owner: WebView, cbId: String, json: String) {
@@ -785,6 +819,20 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
+        fun logEvent(json: String) {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var pageUrl = ""
+            runOnUiThread {
+                try { pageUrl = owner.url ?: "" } catch (e: Exception) { }
+                latch.countDown()
+            }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            val host = try { Uri.parse(pageUrl).host } catch (e: Exception) { null }
+            if (!isXHost(host)) return
+            engHistAdd(if (json.length > 3000) json.substring(0, 3000) else json)
+        }
+
+        @JavascriptInterface
         fun gen(prompt: String, callbackId: String) {
             // WebView.getUrl() must run on the UI thread; JS bridge calls arrive on a background thread
             val latch = java.util.concurrent.CountDownLatch(1)
@@ -808,6 +856,28 @@ class MainActivity : Activity() {
                 }
                 engDeliver(owner, callbackId, out)
             }.start()
+        }
+    }
+
+    private val histLock = Any()
+
+    private fun engHistGet(): String = synchronized(histLock) { engPrefs().getString("hist", "[]") ?: "[]" }
+
+    private fun engHistAdd(eventJson: String) {
+        synchronized(histLock) {
+            try {
+                val ev = JSONObject(eventJson)
+                val arr = JSONArray(engPrefs().getString("hist", "[]") ?: "[]")
+                arr.put(ev)
+                val keep = 3000
+                val out = if (arr.length() > keep) {
+                    val n = JSONArray()
+                    for (i in (arr.length() - keep) until arr.length()) n.put(arr.get(i))
+                    n
+                } else arr
+                engPrefs().edit().putString("hist", out.toString()).apply()
+            } catch (e: Exception) {
+            }
         }
     }
 
