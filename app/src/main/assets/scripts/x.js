@@ -10,16 +10,27 @@
   var CK = 'zenEngCfg', RK = 'zenEngReplied';
   var DEF = { sea: false, fed: false, auto: false, like: false, likePct: 100, target: false, targetKw: '',
     tone: 'Positive', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
-    ageOn: false, ageMinMin: 0, ageMaxMin: 60, skipReplies: true, myHandle: '' };
-  function loadCfg() { var c = {}; try { c = JSON.parse(localStorage.getItem(CK) || '{}') || {}; } catch (e) {} var o = {}; for (var k in DEF) o[k] = (k in c) ? c[k] : DEF[k]; return o; }
+    ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '' };
+  // settings + runtime toggles live in the app (SharedPreferences) so the Engine settings page and this panel share them
+  function loadCfg() {
+    var c = {};
+    try { var raw = (window.ZenEng && window.ZenEng.getCfg) ? window.ZenEng.getCfg() : localStorage.getItem(CK); c = JSON.parse(raw || '{}') || {}; } catch (e) {}
+    var o = {}; for (var k in DEF) o[k] = (k in c) ? c[k] : DEF[k]; return o;
+  }
   var cfg = loadCfg();
-  function saveCfg() { try { localStorage.setItem(CK, JSON.stringify(cfg)); } catch (e) {} }
+  function patchCfg(p) {
+    for (var k in p) cfg[k] = p[k];
+    try { if (window.ZenEng && window.ZenEng.setCfg) window.ZenEng.setCfg(JSON.stringify(p)); else localStorage.setItem(CK, JSON.stringify(cfg)); } catch (e) {}
+  }
   var replied = {}; try { replied = JSON.parse(localStorage.getItem(RK) || '{}') || {}; } catch (e) {}
   function markReplied(id, eng) {
     if (!id) return; replied[id] = { e: eng, t: Date.now() };
     var ks = Object.keys(replied); if (ks.length > 3000) { ks.sort(function (a, b) { return replied[a].t - replied[b].t; }); ks.slice(0, 500).forEach(function (k) { delete replied[k]; }); }
     try { localStorage.setItem(RK, JSON.stringify(replied)); } catch (e) {}
   }
+  var stat = { msg: 'Idle', done: 0, skip: 0 }, skipSeen = {};
+  function setStat(m) { stat.msg = m; }
+  function noteSkip(a) { var i = statusId(a); if (i && !skipSeen[i]) { skipSeen[i] = 1; stat.skip++; } }
   var skipped = {};   // this page session: status ids that failed / comment-off
   var tag = { SEA: 'zen-sea-btn', FED: 'zen-fed-btn' };
 
@@ -65,26 +76,55 @@
     }
     return false;
   }
-  var ownH = null;
+  var ownH = null, ownLearned = null;
   function ownHandle() {
+    if (ownLearned) return ownLearned;   // composer avatar = ground truth
     var mh = String(cfg.myHandle || '').replace(/^@/, '').trim().toLowerCase();
     if (mh) return mh;
     if (ownH) return ownH;
-    var b = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
-    var m = b && /@([A-Za-z0-9_]{1,15})/.exec(b.textContent || ''); if (m) ownH = m[1].toLowerCase();
+    try {   // X keeps the session user in its page state
+      var st = window.__INITIAL_STATE__, uid = st && st.session && (st.session.user_id || (st.session.user && st.session.user.id_str));
+      var u = uid && st.entities && st.entities.users && st.entities.users.entities && st.entities.users.entities[uid];
+      if (u && u.screen_name) ownH = String(u.screen_name).toLowerCase();
+    } catch (e) {}
+    if (!ownH) {
+      var b = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
+      var m = b && /@([A-Za-z0-9_]{1,15})/.exec(b.textContent || ''); if (m) ownH = m[1].toLowerCase();
+    }
     if (!ownH) { var p = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]'); var h = p && /^\/([A-Za-z0-9_]+)$/.exec(p.getAttribute('href') || ''); if (h) ownH = h[1].toLowerCase(); }
+    if (!ownH) {
+      var av = document.querySelector('[data-testid="DashButton_ProfileIcon_Link"] [data-testid^="UserAvatar-Container-"], header [data-testid^="UserAvatar-Container-"]');
+      var id = av && (av.getAttribute('data-testid') || '').replace('UserAvatar-Container-', '').toLowerCase();
+      if (id && /^[a-z0-9_]{1,15}$/.test(id)) ownH = id;
+    }
     return ownH;
   }
-  function learnOwnFromComposer() {   // the composer's own avatar is the last avatar inside the reply dialog
-    if (ownHandle()) return;
+  function learnOwnFromComposer() {   // the composer's own avatar is the last avatar in the reply box
     var d = document.querySelector('[aria-modal="true"]') || document;
     var av = $$('[data-testid^="UserAvatar-Container-"]', d); if (!av.length) return;
     var id = (av[av.length - 1].getAttribute('data-testid') || '').replace('UserAvatar-Container-', '').toLowerCase();
-    if (/^[a-z0-9_]{1,15}$/.test(id)) { ownH = id; }
+    if (/^[a-z0-9_]{1,15}$/.test(id) && id !== ownLearned) {
+      var had = ownHandle(); ownLearned = id;
+      if (had !== id) toast('Your account detected: @' + id, 'success');
+    }
   }
+  async function probeOwnHandle() {
+    if (ownHandle()) return true;
+    var link = document.querySelector('a[href="/compose/post"],[data-testid="FloatingActionButton_Tweet"],[data-testid="SideNav_NewTweet_Button"]');
+    if (!link) return false;
+    await tap(link);
+    var t0 = Date.now();
+    while (Date.now() - t0 < 7000 && !document.querySelector('[data-testid="tweetTextarea_0"]')) await sleep(150);
+    await sleep(500); learnOwnFromComposer();
+    await closeComposer();
+    if (document.querySelector('[data-testid="tweetTextarea_0"]')) { try { history.back(); } catch (e) {} await sleep(600); }
+    return !!ownHandle();
+  }
+  var ourTexts = {};   // replies we wrote: never reply to a post carrying our own text
+  function normT(t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   function isOwn(a) { var o = ownHandle(), au = author(a); return !!(o && au && o === au); }
   var REPLYING = /^\s*(replying to|en réponse à|en respuesta a|antwort an|em resposta a|in risposta a|в ответ|yanıt olarak|membalas|balasan untuk)\b/i;
-  function isReply(a) {   // any post that is a comment ("Replying to ...")
+  function isReply(a) {   // a comment: the "Replying to @x" line sits between the name row and the post text
     try {
       var head = a.querySelector('[data-testid="User-Name"]'); if (!head) return false;
       var body = a.querySelector('[data-testid="tweetText"]');
@@ -94,13 +134,10 @@
       for (var i = 0; i < ls.length; i++) {
         var l = ls[i]; if ((l.textContent || '').trim().charAt(0) !== '@') continue;
         if (head.contains(l)) continue;
-        if (!(head.compareDocumentPosition(l) & 4)) continue;
-        if (body && (body.contains(l) || !(l.compareDocumentPosition(body) & 4))) continue;
-        var row = l.parentElement;
-        for (var up = 0; up < 4 && row && row !== a; up++, row = row.parentElement) {
-          if (row.contains(head) || (body && row.contains(body))) break;
-          if (REPLYING.test(row.textContent || '')) return true;
-        }
+        if (!(head.compareDocumentPosition(l) & 4)) continue;                    // must come after the name row
+        if (body && (body.contains(l) || !(l.compareDocumentPosition(body) & 4))) continue;   // and before the post text
+        if (l.closest('[data-testid="card.wrapper"],[data-testid="quoteTweet"],[role="group"]')) continue;
+        return true;   // language independent: an @link between name row and text = "Replying to"
       }
     } catch (e) {}
     return false;
@@ -306,17 +343,20 @@
     busy.add(a);
     var html = btn.innerHTML; btn.textContent = '...'; btn.disabled = true;
     try {
+      setStat('Opening reply');
       if (cfg.like && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < cfg.likePct) {
         var lk = a.querySelector('[data-testid="like"]'); if (lk) { await tap(lk); await sleep(rnd(700, 1600)); }
       }
       var ed = await openReplyBox(a); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
+      setStat('Generating reply');
       var reply = cleanReply(await gen(post)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
       if (!(await insertText(ed, reply))) throw new Error('Text did not land in the box');
+      ourTexts[normT(reply)] = 1;
       var posted = false;
-      if (cfg.auto) posted = await postReply(liveEditor() || ed);
+      if (cfg.auto) { setStat('Posting'); posted = await postReply(liveEditor() || ed); }
       btn.textContent = 'DONE'; btn.classList.add('zen-done'); btn.style.opacity = '.6';
-      if (posted) markReplied(sid, eng);
+      if (posted) { markReplied(sid, eng); stat.done++; }
       toast(posted ? 'Reply posted' : 'Reply drafted — review & tap Reply', 'success');
       return true;
     } catch (err) {
@@ -327,17 +367,17 @@
   }
 
   function injectButton(a, eng) {
-    if (done.has(a) || isAd(a)) return;
+    if (done.has(a)) return;
+    if (isAd(a)) { done.add(a); noteSkip(a); return; }
     if (a.querySelector('.' + tag[eng])) { done.add(a); return; }
     var bar = a.querySelector('[role="group"]'); if (!bar) return;
     var te = a.querySelector('[data-testid="tweetText"]');
-    if (isOwn(a)) { done.add(a); return; }
+    if (isOwn(a) || (te && ourTexts[normT(txt(te))])) { done.add(a); noteSkip(a); return; }   // own posts: always skipped
+    if (isReply(a)) { done.add(a); noteSkip(a); return; }                                      // comments: always skipped
     if (eng === 'SEA') {
-      if (cfg.skipReplies && isReply(a)) { done.add(a); return; }
       var v = ageVerdict(a); if (v !== 'ok') { done.add(a); if (v === 'old') { var o = statusId(a); if (o) oldSeen[o] = 1; } return; }
     } else {
       if (!te || !txt(te).trim()) { done.add(a); return; }
-      if (cfg.skipReplies && isReply(a)) { done.add(a); return; }
       if (!targetOk(txt(te))) { done.add(a); return; }
     }
     done.add(a);
@@ -362,8 +402,9 @@
   }
   async function autoLoop(eng) {
     if (autoRunning) return;
-    if (!ownHandle()) { cfg.auto = false; saveCfg(); renderPanel(); toast('Auto stopped: type your @handle in the Z panel first (so it never replies to your own posts)', 'warn'); return; }
-    autoRunning = true; runCount = 0;
+    autoRunning = true; runCount = 0; stat.done = 0; stat.skip = 0; skipSeen = {}; setStat('Detecting your account');
+    if (!(await probeOwnHandle())) { autoRunning = false; patchCfg({ auto: false }); setStat('Stopped'); toast('Could not detect your account. Set My @handle in Engine settings.', 'warn'); return; }
+    setStat('Running');
     var none = 0, cls = tag[eng];
     try {
       while (cfg.auto && curMode() === eng && runCount < cfg.maxRun) {
@@ -372,7 +413,7 @@
           none++;
           if (eng === 'SEA' && cfg.ageOn && Object.keys(oldSeen).length >= 4) { toast('Reached posts older than the age limit — stopped', 'success'); break; }
           if (none > 6) { toast('No more posts — auto stopped', 'success'); break; }
-          var prev = postIds(); await scrollDown(); await waitMore(prev); await sleep(1200); continue;
+          setStat('Scrolling for new posts'); var prev = postIds(); await scrollDown(); await waitMore(prev); await sleep(1200); continue;
         }
         none = 0;
         var btn = target.querySelector('.' + cls);
@@ -381,13 +422,13 @@
         runCount++;
         if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s = statusId(target); if (s) skipped[s] = 1; await closeComposer(); await sleep(1200); continue; }
         await waitClose(lastEditor);
-        await sleep(rnd(cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)) * 1000);
+        var pw = rnd(cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)); setStat('Waiting ' + Math.round(pw) + 's'); await sleep(pw * 1000);
       }
     } catch (e) { toast(String(e && e.message || e), 'error'); }
     finally {
-      autoRunning = false;
+      autoRunning = false; setStat(cfg.auto ? 'Stopped' : 'Idle');
       if (runCount >= cfg.maxRun && cfg.auto) toast('Max per run reached — auto stopped', 'success');
-      if (cfg.auto && (runCount >= cfg.maxRun || none > 6 || Object.keys(oldSeen).length >= 4)) { cfg.auto = false; saveCfg(); renderPanel(); }
+      if (cfg.auto && (runCount >= cfg.maxRun || none > 6 || Object.keys(oldSeen).length >= 4)) { patchCfg({ auto: false }); }
     }
   }
 
@@ -398,6 +439,7 @@
     $$('.zen-eng-btn').forEach(function (b) { b.remove(); });
   }
   function scan() {
+    cfg = loadCfg();
     var m = curMode();
     if (m !== lastMode) { teardown(); lastMode = m; if (m) toast(m + ' engine ON — buttons appear on posts', 'success'); }
     if (!m) return;
@@ -406,42 +448,61 @@
     if (cfg.auto && !autoRunning) autoLoop(m);
   }
 
-  // ---------------- control panel ----------------
+  // ---------------- floating panel (runtime only: engines, start/stop, live status) ----------------
+  var panelOpen = false;
   function renderPanel() {
-    var p = document.getElementById('zeng-panel'); if (!p) return;
-    var row = function (label, html) { return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:7px 0"><span>' + label + '</span>' + html + '</div>'; };
-    var chk = function (k) { return '<input type="checkbox" data-k="' + k + '"' + (cfg[k] ? ' checked' : '') + ' style="width:20px;height:20px">'; };
-    var inp = function (k, w, type) { return '<input data-k="' + k + '" type="' + (type || 'text') + '" value="' + String(cfg[k]).replace(/"/g, '&quot;') + '" style="width:' + w + 'px;background:#111;color:#fff;border:1px solid #444;border-radius:8px;padding:6px;font-size:13px">'; };
-    var tones = Object.keys(TONES).map(function (t) { return '<option' + (t === cfg.tone ? ' selected' : '') + '>' + t + '</option>'; }).join('');
-    p.innerHTML = '<div style="font-weight:800;letter-spacing:2px;margin-bottom:6px">ZEN ENGINE</div>' +
-      row('SEA (search page)', chk('sea')) + row('FED (home feed)', chk('fed')) + row('<b>AUTO MODE</b>', chk('auto')) +
-      row('Like first', chk('like')) + row('Like %', inp('likePct', 60, 'number')) +
-      row('Tone', '<select data-k="tone" style="background:#111;color:#fff;border:1px solid #444;border-radius:8px;padding:6px">' + tones + '</select>') +
-      row('Style', inp('style', 150)) + row('Keyword', inp('keyword', 150)) +
-      row('FED target filter', chk('target')) + row('Target words (a,b,c)', inp('targetKw', 130)) +
-      row('Skip comments (SEA+FED)', chk('skipReplies')) + row('SEA age limit', chk('ageOn')) +
-      row('Age min / max (min)', inp('ageMinMin', 48, 'number') + inp('ageMaxMin', 48, 'number')) +
-      row('My @handle', inp('myHandle', 130)) + row('Max per run', inp('maxRun', 60, 'number')) + row('Pause min / max (s)', inp('paceMin', 48, 'number') + inp('paceMax', 48, 'number')) +
-      '<div style="font-size:11px;color:#999;margin-top:6px">SEA works on x.com/search, FED on x.com/home. API keys: Menu → Engine API keys.</div>';
-    $$('[data-k]', p).forEach(function (el) {
-      el.onchange = function () {
-        var k = el.getAttribute('data-k'), v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
-        if (el.type === 'number' && !isFinite(v)) return; cfg[k] = v; saveCfg();
-        if (k === 'sea' || k === 'fed' || k === 'auto' || k === 'ageOn') { lastMode = '#'; }
-        scan();
-      };
-    });
+    var fab = document.getElementById('zeng-fab'), p = document.getElementById('zeng-panel'); if (!fab || !p) return;
+    fab.style.background = autoRunning ? '#15803d' : '#6d28d9';
+    if (!panelOpen) { p.style.display = 'none'; return; }
+    p.style.display = 'block';
+    var m = curMode(), chip = function (k, label) { return '<div data-act="' + k + '" style="flex:1;text-align:center;padding:9px 0;border-radius:10px;font-weight:800;border:1px solid ' + (cfg[k] ? '#22c55e' : '#444') + ';background:' + (cfg[k] ? '#14532d' : '#16122a') + ';color:' + (cfg[k] ? '#bbf7d0' : '#aaa') + '">' + label + (cfg[k] ? ' ON' : ' OFF') + '</div>'; };
+    var where = isSearchUrl() ? 'on search page (SEA)' : isHomeUrl() ? 'on home feed (FED)' : 'open x.com/search or x.com/home';
+    p.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;font-weight:800;letter-spacing:2px;margin-bottom:8px"><span>ZEN ENGINE</span><span style="font-size:11px;color:' + (autoRunning ? '#4ade80' : '#9ca3af') + '">' + (autoRunning ? 'RUNNING' : 'IDLE') + '</span></div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px">' + chip('sea', 'SEA') + chip('fed', 'FED') + '</div>' +
+      '<div style="font-size:12px;color:#c4b5fd;margin-bottom:2px">' + (m ? m + ' active' : 'No engine active') + ' · ' + where + '</div>' +
+      '<div style="font-size:12px;color:#ddd;margin-bottom:2px">' + stat.msg + '</div>' +
+      '<div style="font-size:12px;color:#9ca3af;margin-bottom:10px">Replied ' + stat.done + ' / ' + cfg.maxRun + ' · Skipped ' + stat.skip + '</div>' +
+      '<div data-act="auto" style="text-align:center;padding:12px 0;border-radius:12px;font-weight:800;background:' + (cfg.auto ? '#b91c1c' : '#6d28d9') + ';margin-bottom:8px">' + (cfg.auto ? 'STOP' : 'START') + '</div>' +
+      '<div data-act="settings" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd">Settings</div>';
+  }
+  function onPanelTap(e) {
+    var t = e.target.closest ? e.target.closest('[data-act]') : null; if (!t) return;
+    var act = t.getAttribute('data-act');
+    if (act === 'sea' || act === 'fed') { var p = {}; p[act] = !cfg[act]; patchCfg(p); lastMode = '#'; scan(); }
+    else if (act === 'auto') {
+      if (cfg.auto) { patchCfg({ auto: false }); setStat('Stopping'); }
+      else if (!(cfg.sea || cfg.fed)) toast('Turn on SEA or FED first', 'warn');
+      else if (!curMode()) toast('Open x.com/search (SEA) or x.com/home (FED)', 'warn');
+      else { patchCfg({ auto: true }); scan(); }
+    } else if (act === 'settings') {
+      if (window.ZenEng && window.ZenEng.openSettings) window.ZenEng.openSettings(); else toast('Update the app to open Engine settings', 'warn');
+    }
+    renderPanel();
+  }
+  function placeUi() {   // keep the button/panel on the visible screen even when the page is zoomed or shifted
+    var fab = document.getElementById('zeng-fab'), p = document.getElementById('zeng-panel'); if (!fab || !p) return;
+    var vv = window.visualViewport, sc = vv ? 1 / vv.scale : 1, ox = vv ? vv.offsetLeft : 0, oy = vv ? vv.offsetTop : 0, vh = vv ? vv.height : window.innerHeight;
+    fab.style.transformOrigin = 'top left'; fab.style.transform = 'scale(' + sc + ')';
+    fab.style.left = (ox + 10 * sc) + 'px'; fab.style.top = (oy + vh - 120 * sc) + 'px';
+    p.style.transformOrigin = 'top left'; p.style.transform = 'scale(' + sc + ')';
+    p.style.left = (ox + 8 * sc) + 'px'; p.style.top = (oy + vh - (128 * sc) - p.offsetHeight * sc) + 'px';
   }
   function buildPanel() {
     if (document.getElementById('zeng-fab') || !document.body) return;
     var fab = document.createElement('div'); fab.id = 'zeng-fab'; fab.textContent = 'Z';
-    fab.style.cssText = 'position:fixed;left:10px;bottom:70px;width:40px;height:40px;border-radius:20px;background:#6d28d9;color:#fff;font:800 16px sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;opacity:.85';
+    fab.style.cssText = 'position:fixed;left:10px;top:0;width:40px;height:40px;border-radius:20px;background:#6d28d9;color:#fff;font:800 16px sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;opacity:.9';
     var p = document.createElement('div'); p.id = 'zeng-panel';
-    p.style.cssText = 'position:fixed;left:8px;bottom:118px;width:min(330px,92vw);max-height:60vh;overflow:auto;background:#0d0a14;color:#fff;border:1px solid #6d28d9;border-radius:14px;padding:12px;font:13px sans-serif;z-index:2147483646;display:none';
-    fab.addEventListener('click', function () { p.style.display = p.style.display === 'none' ? 'block' : 'none'; if (p.style.display === 'block') renderPanel(); });
+    p.style.cssText = 'position:fixed;left:8px;top:0;width:230px;background:#0d0a14;color:#fff;border:1px solid #6d28d9;border-radius:14px;padding:12px;font:13px sans-serif;z-index:2147483646;display:none';
+    fab.addEventListener('click', function () { panelOpen = !panelOpen; renderPanel(); placeUi(); });
+    p.addEventListener('click', onPanelTap);
     document.body.appendChild(p); document.body.appendChild(fab);
+    renderPanel(); placeUi();
   }
 
-  function boot() { buildPanel(); setInterval(function () { try { buildPanel(); scan(); } catch (e) {} }, 1200); }
+  function boot() {
+    buildPanel();
+    setInterval(function () { try { buildPanel(); scan(); renderPanel(); placeUi(); } catch (e) {} }, 1000);
+    try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', placeUi); window.visualViewport.addEventListener('scroll', placeUi); } } catch (e) {}
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
