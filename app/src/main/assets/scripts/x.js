@@ -116,6 +116,35 @@
     pe('pointerover'); pe('pointerenter', false); me('mouseover'); me('mouseenter', false); me('mousemove');
     pe('pointerdown'); me('mousedown'); pe('pointerup'); me('mouseup'); me('click');
   }
+  // ---------------- animated cursor ----------------
+  var cur = null, curHide = null;
+  function cursorEl() {
+    if (cur && cur.isConnected) return cur;
+    cur = document.createElement('div'); cur.id = 'zeng-cursor';
+    cur.style.cssText = 'position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;z-index:2147483647;pointer-events:none;opacity:0;' +
+      'background:radial-gradient(circle,#fff 0 18%,rgba(167,139,250,.95) 20% 45%,rgba(109,40,217,.35) 48% 100%);box-shadow:0 0 14px 4px rgba(139,92,246,.75);' +
+      'transition:transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
+    cur._x = window.innerWidth / 2; cur._y = window.innerHeight * 0.7; cur.style.transform = 'translate(' + cur._x + 'px,' + cur._y + 'px)';
+    document.documentElement.appendChild(cur); return cur;
+  }
+  async function moveCursor(el) {
+    try {
+      var c = cursorEl(), r = el.getBoundingClientRect();
+      var x = r.left + r.width / 2 + rnd(-3, 3), y = r.top + r.height / 2 + rnd(-3, 3);
+      c.style.opacity = '1'; c.style.transform = 'translate(' + x + 'px,' + y + 'px)'; c._x = x; c._y = y;
+      await sleep(480);
+      c.style.transition = 'transform .08s, opacity .25s'; c.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(.7)'; await sleep(90);
+      c.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(1)'; c.style.transition = 'transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
+      var rp = document.createElement('div');
+      rp.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;border:2px solid #a78bfa;z-index:2147483647;pointer-events:none;transition:all .5s ease-out;opacity:.9';
+      document.documentElement.appendChild(rp);
+      setTimeout(function () { rp.style.width = '46px'; rp.style.height = '46px'; rp.style.margin = '-23px 0 0 -23px'; rp.style.opacity = '0'; }, 20);
+      setTimeout(function () { rp.remove(); }, 600);
+      clearTimeout(curHide); curHide = setTimeout(function () { if (cur) cur.style.opacity = '0'; }, 3500);
+    } catch (e) {}
+  }
+  async function tap(el) { await moveCursor(el); pointerClick(el); }
+
   async function ensureVisible(el) {
     try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) { try { el.scrollIntoView(); } catch (e2) {} }
     for (var i = 0; i < 12; i++) { var r = el.getBoundingClientRect(); if (r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight) break; await sleep(100); }
@@ -137,7 +166,7 @@
   async function openReplyBox(a) {
     await ensureVisible(a);
     var icon = a.querySelector('[data-testid="reply"]'); if (!icon) return null;
-    pointerClick(icon);
+    await tap(icon);
     var t0 = Date.now();
     while (Date.now() - t0 < 9500) {
       await sleep(100);
@@ -188,7 +217,7 @@
     if (!b) return false;
     await sleep(rnd(2000, 3000));
     try { b.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
-    pointerClick(b);
+    await tap(b);
     var t1 = Date.now();
     while (Date.now() - t1 < 6000) {
       await sleep(150);
@@ -201,8 +230,8 @@
     try {
       var close = document.querySelector('[data-testid="app-bar-close"]') || document.querySelector('[aria-label="Close"]');
       if (close && document.querySelector('[data-testid="tweetTextarea_0"]')) {
-        pointerClick(close); await sleep(500);
-        var disc = document.querySelector('[data-testid="confirmationSheetConfirm"]'); if (disc) { pointerClick(disc); await sleep(400); }
+        await tap(close); await sleep(500);
+        var disc = document.querySelector('[data-testid="confirmationSheetConfirm"]'); if (disc) { await tap(disc); await sleep(400); }
       }
     } catch (e) {}
   }
@@ -264,7 +293,7 @@
     var html = btn.innerHTML; btn.textContent = '...'; btn.disabled = true;
     try {
       if (cfg.like && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < cfg.likePct) {
-        var lk = a.querySelector('[data-testid="like"]'); if (lk) { pointerClick(lk); await sleep(rnd(700, 1600)); }
+        var lk = a.querySelector('[data-testid="like"]'); if (lk) { await tap(lk); await sleep(rnd(700, 1600)); }
       }
       var ed = await openReplyBox(a); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
@@ -330,7 +359,6 @@
         }
         none = 0;
         var btn = target.querySelector('.' + cls);
-        if (document.hidden) { await sleep(1000); continue; }
         await ensureVisible(target);
         var ok = await handleClick(target, btn, eng);
         runCount++;
