@@ -12,7 +12,20 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.app.Dialog
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.Window
+import android.widget.ScrollView
+import android.widget.TextView
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -145,7 +158,8 @@ class MainActivity : Activity() {
     private val tabs = ArrayList<Tab>()
     private var cur = 0
     private lateinit var content: FrameLayout
-    private lateinit var tabsBtn: Button
+    private lateinit var tabsBtn: BarIcon
+    private lateinit var homeBtn: BarIcon
     private var fileCallback: ValueCallback<Array<Uri>>? = null
 
     private val assetLoader: WebViewAssetLoader by lazy {
@@ -256,35 +270,285 @@ class MainActivity : Activity() {
 
     // ---------------- UI ----------------
 
+    // Bottom bar icons are drawn with Canvas (no image files, no font issues)
+    private inner class BarIcon(ctx: Context, private val kind: Int) : View(ctx) {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        var count = 1
+        var active = false
+            set(v) { field = v; invalidate() }
+
+        init {
+            p.style = Paint.Style.STROKE
+            p.strokeCap = Paint.Cap.ROUND
+            p.strokeJoin = Paint.Join.ROUND
+            isClickable = true
+            val tv = TypedValue()
+            if (ctx.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)) {
+                setBackgroundResource(tv.resourceId)
+            }
+        }
+
+        override fun onDraw(c: Canvas) {
+            val s = dp(24).toFloat()
+            val u = s / 24f
+            c.save()
+            c.translate(width / 2f - s / 2f, height / 2f - s / 2f)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 2f * u
+            p.color = if (active) Color.parseColor("#A78BFA") else Color.parseColor("#B4B4C6")
+            when (kind) {
+                0 -> {
+                    val roof = Path()
+                    roof.moveTo(3f * u, 11f * u); roof.lineTo(12f * u, 3.5f * u); roof.lineTo(21f * u, 11f * u)
+                    c.drawPath(roof, p)
+                    val body = Path()
+                    body.moveTo(5.5f * u, 9.5f * u); body.lineTo(5.5f * u, 20f * u); body.lineTo(18.5f * u, 20f * u); body.lineTo(18.5f * u, 9.5f * u)
+                    c.drawPath(body, p)
+                    c.drawLine(10f * u, 20f * u, 10f * u, 14f * u, p)
+                    c.drawLine(14f * u, 20f * u, 14f * u, 14f * u, p)
+                    c.drawLine(10f * u, 14f * u, 14f * u, 14f * u, p)
+                }
+                1 -> {
+                    c.drawLine(20f * u, 12f * u, 5f * u, 12f * u, p)
+                    val h = Path()
+                    h.moveTo(11f * u, 6f * u); h.lineTo(5f * u, 12f * u); h.lineTo(11f * u, 18f * u)
+                    c.drawPath(h, p)
+                }
+                2 -> {
+                    c.drawArc(RectF(4f * u, 4f * u, 20f * u, 20f * u), -40f, 290f, false, p)
+                    val h = Path()
+                    h.moveTo(20f * u, 3.5f * u); h.lineTo(20f * u, 9f * u); h.lineTo(14.5f * u, 9f * u)
+                    c.drawPath(h, p)
+                }
+                3 -> {
+                    c.drawRoundRect(RectF(3.5f * u, 3.5f * u, 20.5f * u, 20.5f * u), 5f * u, 5f * u, p)
+                    p.style = Paint.Style.FILL
+                    p.textSize = 11f * u
+                    p.textAlign = Paint.Align.CENTER
+                    p.typeface = Typeface.DEFAULT_BOLD
+                    c.drawText(count.toString(), 12f * u, 16f * u, p)
+                    p.textAlign = Paint.Align.LEFT
+                    p.typeface = Typeface.DEFAULT
+                }
+                else -> {
+                    p.style = Paint.Style.FILL
+                    c.drawCircle(5f * u, 12f * u, 2f * u, p)
+                    c.drawCircle(12f * u, 12f * u, 2f * u, p)
+                    c.drawCircle(19f * u, 12f * u, 2f * u, p)
+                }
+            }
+            c.restore()
+        }
+    }
+
     private fun buildBar(): LinearLayout {
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.VERTICAL
+        wrap.setBackgroundColor(Color.parseColor("#0C0C11"))
+
+        val line = View(this)
+        line.setBackgroundColor(Color.parseColor("#1F1F2B"))
+        wrap.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+
         val bar = LinearLayout(this)
         bar.orientation = LinearLayout.HORIZONTAL
-        bar.setBackgroundColor(Color.parseColor("#111111"))
+        bar.gravity = Gravity.CENTER_VERTICAL
+        wrap.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)))
 
-        fun btn(label: String, onClick: () -> Unit): Button {
-            val b = Button(this@MainActivity)
-            b.text = label
-            b.isAllCaps = false
-            b.textSize = 14f
-            b.setTextColor(Color.WHITE)
-            b.setBackgroundColor(Color.TRANSPARENT)
+        fun icon(kind: Int, onClick: () -> Unit): BarIcon {
+            val b = BarIcon(this@MainActivity, kind)
             b.setOnClickListener { onClick() }
             bar.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             return b
         }
 
-        btn("Home") { switchTo(0) }
-        btn("Back") { handleBack(false) }
-        btn("Reload") { tabs[cur].web.reload() }
-        tabsBtn = btn("[1]") { showTabs() }
-        btn("Menu") { showMenu() }
-        return bar
+        homeBtn = icon(0) { switchTo(0) }
+        icon(1) { handleBack(false) }
+        icon(2) { tabs[cur].web.reload() }
+        tabsBtn = icon(3) { showTabs() }
+        icon(4) { showMenu() }
+        return wrap
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun updateTabsBtn() {
-        tabsBtn.text = "[${tabs.size}]"
+        tabsBtn.count = tabs.size
+        tabsBtn.invalidate()
+        homeBtn.active = (cur == 0)
+    }
+
+    // ---------------- Bottom sheet (Tabs + Menu) ----------------
+
+    private fun sheet(title: String, build: (LinearLayout, Dialog) -> Unit) {
+        val dlg = Dialog(this)
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(14), dp(10), dp(14), dp(16))
+        val bg = GradientDrawable()
+        bg.setColor(Color.parseColor("#0F0F15"))
+        bg.cornerRadii = floatArrayOf(dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), 0f, 0f, 0f, 0f)
+        bg.setStroke(1, Color.parseColor("#26263A"))
+        box.background = bg
+
+        val grab = View(this)
+        val gb = GradientDrawable()
+        gb.setColor(Color.parseColor("#3A3A4E"))
+        gb.cornerRadius = dp(3).toFloat()
+        grab.background = gb
+        val gp = LinearLayout.LayoutParams(dp(38), dp(4))
+        gp.gravity = Gravity.CENTER_HORIZONTAL
+        gp.bottomMargin = dp(12)
+        box.addView(grab, gp)
+
+        val tt = TextView(this)
+        tt.text = title
+        tt.setTextColor(Color.WHITE)
+        tt.textSize = 18f
+        tt.typeface = Typeface.DEFAULT_BOLD
+        tt.setPadding(dp(4), 0, 0, dp(10))
+        box.addView(tt)
+
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        build(list, dlg)
+        val sv = ScrollView(this)
+        sv.isVerticalScrollBarEnabled = false
+        sv.addView(list)
+        box.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        dlg.setContentView(box)
+        val w = dlg.window
+        if (w != null) {
+            w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            w.setGravity(Gravity.BOTTOM)
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            w.setDimAmount(0.6f)
+        }
+        dlg.show()
+    }
+
+    private fun sheetLabel(list: LinearLayout, text: String) {
+        val l = TextView(this)
+        l.text = text
+        l.setTextColor(Color.parseColor("#6E6E86"))
+        l.textSize = 10.5f
+        l.letterSpacing = 0.12f
+        l.typeface = Typeface.DEFAULT_BOLD
+        l.setPadding(dp(4), dp(10), 0, dp(6))
+        list.addView(l)
+    }
+
+    // badge: small pill on the right (ON / OFF); good = green pill, otherwise grey
+    private fun sheetRow(list: LinearLayout, dlg: Dialog, icon: String, title: String, sub: String?, badge: String?, good: Boolean, action: () -> Unit) {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(dp(12), dp(10), dp(12), dp(10))
+        val rb = GradientDrawable()
+        rb.cornerRadius = dp(14).toFloat()
+        rb.setColor(Color.parseColor("#17171F"))
+        row.background = rb
+
+        val ic = TextView(this)
+        ic.text = icon
+        ic.textSize = 17f
+        ic.gravity = Gravity.CENTER
+        val ib = GradientDrawable()
+        ib.cornerRadius = dp(11).toFloat()
+        ib.setColor(Color.parseColor("#262046"))
+        ic.background = ib
+        row.addView(ic, LinearLayout.LayoutParams(dp(38), dp(38)))
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val t = TextView(this)
+        t.text = title
+        t.setTextColor(Color.WHITE)
+        t.textSize = 14.5f
+        t.typeface = Typeface.DEFAULT_BOLD
+        col.addView(t)
+        if (sub != null) {
+            val st = TextView(this)
+            st.text = sub
+            st.setTextColor(Color.parseColor("#80809A"))
+            st.textSize = 11.5f
+            col.addView(st)
+        }
+        val cp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        cp.leftMargin = dp(12)
+        row.addView(col, cp)
+
+        if (badge != null) {
+            val bd = TextView(this)
+            bd.text = badge
+            bd.textSize = 11f
+            bd.typeface = Typeface.DEFAULT_BOLD
+            bd.setTextColor(if (good) Color.parseColor("#6EE7B7") else Color.parseColor("#9A9AB0"))
+            bd.setPadding(dp(10), dp(4), dp(10), dp(4))
+            val bb = GradientDrawable()
+            bb.cornerRadius = dp(20).toFloat()
+            bb.setColor(if (good) Color.parseColor("#12332A") else Color.parseColor("#22222E"))
+            bd.background = bb
+            row.addView(bd)
+        }
+
+        row.setOnClickListener { dlg.dismiss(); action() }
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(6)
+        list.addView(row, lp)
+    }
+
+    private fun showTabs() {
+        sheet("Tabs (${tabs.size})") { list, dlg ->
+            tabs.forEachIndexed { i, t ->
+                val label = if (t.isHome) "Home" else t.title.ifEmpty { t.web.url ?: "Tab" }
+                val sub = if (t.isHome) null else t.web.url
+                sheetRow(list, dlg, if (t.isHome) "\u2302" else if (t.isZ1) "Z" else "\uD83C\uDF10", label, sub, if (i == cur) "OPEN" else null, true) { switchTo(i) }
+            }
+            sheetLabel(list, "ACTIONS")
+            sheetRow(list, dlg, "\u2715", "Close current tab", null, null, false) { closeTab(cur) }
+        }
+    }
+
+    private fun showMenu() {
+        val ct = tabs[cur]
+        val canDesk = !(ct.isHome || ct.isZ1)
+        sheet("Menu") { list, dlg ->
+            sheetLabel(list, "PAGE")
+            sheetRow(list, dlg, "\uD83D\uDDA5", "Desktop site", if (canDesk) "Load the desktop version of this page" else "Not available for this tab",
+                if (canDesk) (if (ct.desktop) "ON" else "OFF") else null, ct.desktop) { toggleDesktop() }
+            sheetRow(list, dlg, "\uD83D\uDD17", "Copy URL", "Copy the address of this page", null, false) {
+                val u = tabs[cur].web.url
+                if (u != null) copy(u)
+            }
+
+            sheetLabel(list, "ENGINE")
+            sheetRow(list, dlg, "\u2699", "Engine settings", "Tone, timing, filters (SEA / FED)", null, false) { openEngSettings() }
+            sheetRow(list, dlg, "\uD83D\uDD11", "Engine API keys", "Gemini, Groq, OpenAI", null, false) { showEngKeys() }
+
+            sheetLabel(list, "SYSTEM")
+            val bg = bgEnabled()
+            sheetRow(list, dlg, "\uD83D\uDD04", "Background run", "Keep the engine alive when the app is hidden", if (bg) "ON" else "OFF", bg) {
+                val on = !bgEnabled()
+                bgPrefs().edit().putBoolean("bg_on", on).apply()
+                if (on) startBackground() else stopBackground()
+                toast(if (on) "Background run: ON" else "Background run: OFF")
+            }
+            sheetRow(list, dlg, "\uD83D\uDD0B", "Battery", "Allow unrestricted battery use", null, false) { askBattery() }
+            sheetRow(list, dlg, "\uD83E\uDDF9", "Clear cookies & site data", "Logs you out of every site", null, false) {
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+                WebStorage.getInstance().deleteAllData()
+                toast("Cleared")
+            }
+
+            sheetLabel(list, "DEBUG TOOLS")
+            sheetRow(list, dlg, "\uD83E\uDDE9", "DOM report", "Current tab", null, false) { domReport() }
+            sheetRow(list, dlg, "\uD83C\uDFAF", "X selector self-test", "Current tab", null, false) { xSelfTest() }
+            sheetRow(list, dlg, "\uD83D\uDD0C", "Bridge test", "Hidden fetch", null, false) { bridgeTest() }
+        }
     }
 
     // ---------------- Tabs ----------------
@@ -385,66 +649,6 @@ class MainActivity : Activity() {
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         handleBack(true)
-    }
-
-    private fun showTabs() {
-        val names = tabs.mapIndexed { i, t ->
-            val label = if (t.isHome) "Home" else t.title.ifEmpty { t.web.url ?: "Tab" }
-            (if (i == cur) "● " else "") + label
-        }.toTypedArray()
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Tabs")
-            .setItems(names) { _, i -> switchTo(i) }
-            .setNeutralButton("Close current") { _, _ -> closeTab(cur) }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showMenu() {
-        val ct = tabs[cur]
-        val deskLabel = if (ct.isHome || ct.isZ1) "Desktop site (not for this tab)"
-            else if (ct.desktop) "Desktop site: ON  (tap = mobile)" else "Desktop site: OFF  (tap = desktop)"
-        val items = arrayOf(
-            deskLabel,
-            "DOM report (current tab)",
-            "X selector self-test (current tab)",
-            "Bridge test (hidden fetch)",
-            "Copy URL",
-            "Clear cookies & site data",
-            if (bgEnabled()) "Background run: ON  (tap = off)" else "Background run: OFF  (tap = on)",
-            "Battery: allow unrestricted",
-            "Engine API keys (SEA/FED)",
-            "Engine settings (SEA/FED)"
-        )
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setItems(items) { _, i ->
-                when (i) {
-                    0 -> toggleDesktop()
-                    1 -> domReport()
-                    2 -> xSelfTest()
-                    3 -> bridgeTest()
-                    4 -> {
-                        val u = tabs[cur].web.url
-                        if (u != null) copy(u)
-                    }
-                    6 -> {
-                        val on = !bgEnabled()
-                        bgPrefs().edit().putBoolean("bg_on", on).apply()
-                        if (on) startBackground() else stopBackground()
-                        toast(if (on) "Background run: ON" else "Background run: OFF")
-                    }
-                    7 -> askBattery()
-                    8 -> showEngKeys()
-                    9 -> openEngSettings()
-                    5 -> {
-                        CookieManager.getInstance().removeAllCookies(null)
-                        CookieManager.getInstance().flush()
-                        WebStorage.getInstance().deleteAllData()
-                        toast("Cleared")
-                    }
-                }
-            }
-            .show()
     }
 
     private fun domReport() {
@@ -1400,6 +1604,13 @@ class MainActivity : Activity() {
         }
     }
 
+    // Z1 tile logo = the bundled Z1 app icon, embedded as a data URI (the home page has its own origin)
+    private fun z1IconImg(): String = try {
+        val b = assets.open("z1/icon-z.png").use { it.readBytes() }
+        val d = android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)
+        "<img src=\"data:image/png;base64,$d\" style=\"width:100%;height:100%;object-fit:cover\">"
+    } catch (e: Exception) { "Z1" }
+
     private fun homeHtml(): String = """
 <!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -1418,10 +1629,9 @@ button{padding:0 22px;border:1px solid #333;border-left:0;border-radius:0 26px 2
 <h1>ZEN BROWSER</h1>
 <form onsubmit="return s()"><input id="q" placeholder="Search or type URL" autocomplete="off" autocapitalize="off"><button type="submit">Go</button></form>
 <div class="g">
-<div class="t" onclick="Z.open('$X_URL')"><div class="i" style="background:#111;border:1px solid #333">X</div>X</div>
-<div class="t" onclick="Z.open('$Z1_URL')"><div class="i" style="background:#6d28d9">Z1</div>Z1</div>
-<div class="t" onclick="Z.open('$ENG_URL')"><div class="i" style="background:#15803d">ENG</div>Engine</div>
-<div class="t" onclick="Z.open('$TG_URL')"><div class="i" style="background:#229ed9">TG</div>Telegram</div>
+<div class="t" onclick="Z.open('$X_URL')"><div class="i" style="background:#111;border:1px solid #333"><svg width="34" height="34" viewBox="0 0 24 24" fill="#fff"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></div>X</div>
+<div class="t" onclick="Z.open('$Z1_URL')"><div class="i" style="background:#6d28d9;overflow:hidden">${z1IconImg()}</div>Z1</div>
+<div class="t" onclick="Z.open('$TG_URL')"><div class="i" style="background:#229ed9"><svg width="38" height="38" viewBox="0 0 24 24" fill="#fff"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg></div>Telegram</div>
 </div>
 <script>
 function s(){var q=document.getElementById('q').value.trim();if(q)Z.search(q);return false}
