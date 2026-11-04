@@ -238,6 +238,8 @@
     while (Date.now() - t0 < 9500) {
       await sleep(100);
       if (replyOffDialog()) { var e = new Error('comments off'); e.off = true; throw e; }
+      if (toastDead() || pageDead()) { var ed1 = new Error('Post deleted / unavailable'); ed1.dead = true; throw ed1; }
+      if (limitShowing()) { var el1 = new Error('X limit reached (too many replies)'); el1.limit = true; throw el1; }
       var modal = document.querySelector('[aria-modal="true"][role="dialog"],[data-testid="sheetDialog"]');
       var w = modal && modal.querySelector('[data-testid="tweetTextarea_0"]');
       if (!w && a.parentElement) w = a.parentElement.querySelector('[data-testid="tweetTextarea_0"]');
@@ -288,11 +290,24 @@
     var t1 = Date.now();
     while (Date.now() - t1 < 6000) {
       await sleep(150);
+      if (postErrorShowing()) {
+        var ex = new Error('X: something went wrong'); ex.xerr = true;
+        if (limitShowing()) { ex.limit = true; ex.message = 'X: daily reply limit reached'; return await failPost(ed, ex, false); }
+        var es = await es1Retry(ed);
+        if (es === 'ok') return true;
+        if (es === 'routine') { ex.routine = true; ex.message = 'X blocked as automated - cool-down routine started'; }
+        return await failPost(ed, ex, es === 'routine');
+      }
       if (!ed.isConnected && !document.querySelector('[data-testid="tweetTextarea_0"]')) return true;
       if (ed.isConnected && Date.now() - t1 > 1500 && editorEmpty(ed)) return true;   // inline composer on a post page: it stays, but its text is gone
-      var tt = document.querySelector('[data-testid="toast"]'); if (tt && /something went wrong/i.test(tt.textContent || '')) throw new Error('X: something went wrong');
     }
     return !ed.isConnected;
+  }
+  async function failPost(ed, ex, routine) {   // count the safety hit, discard the draft (Back -> Discard), then let the caller move to the next post
+    if (ex.limit) { patchCfg({ auto: false }); fatalMsg = 'X says the daily reply limit is reached - auto stopped'; }
+    else if (safetyHit()) { ex.safety = true; }
+    if (!routine) await recoverPostError();
+    throw ex;
   }
   async function closeComposer() {
     try {
@@ -301,6 +316,133 @@
         await tap(close); await sleep(500);
         var disc = document.querySelector('[data-testid="confirmationSheetConfirm"]'); if (disc) { await tap(disc); await sleep(400); }
       }
+    } catch (e) {}
+  }
+
+  // ---------------- X error handling (port of the extension: zenPostErrorShowing / zenRecoverPostError / zexXPageDeleted /
+  // zexTimelineError / zexReloadForError / Safety stop / Extra Safety 1) ----------------
+  var ERR_RE = /something went wrong|(reply|post) (was )?not sent|couldn.?t (send|post)|could not (send|post)|failed to (send|post)|over the (daily )?limit|daily limit/i;
+  var LIMIT_RE = /over the (daily )?limit|daily limit|rate limit exceeded|too many (requests|posts)/i;
+  var AUTO_RE = /might be automated|looks like it might be automated/i;
+  var DEAD_RE = /this page doesn.?t exist|(this|that) (post|tweet) (was|has been) deleted|(this|that) (post|tweet) (is|was) unavailable|post is unavailable|(this|that) (post|tweet) (doesn.?t|does not) exist|no longer (exists|available)|account suspended|account no longer exists|hmm\.\.\./i;
+  var fatalMsg = '', goodUrl = '', es1Busy = false;
+  function errTextNow() {   // short alert / toast / error nodes only (never whole-page text)
+    var out = '';
+    try {
+      var nodes = document.querySelectorAll('[role="alert"], [data-testid="toast"], [data-testid="error-detail"], main div, [role="dialog"] div');
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i]; if (n.children.length > 4) continue;
+        if (n.closest && n.closest('article')) continue;   // a post's own text can never count as an X error
+        var t = (n.textContent || '').trim(); if (t.length && t.length < 160 && (ERR_RE.test(t) || DEAD_RE.test(t))) out += ' ' + t;
+      }
+    } catch (e) {}
+    return out;
+  }
+  function postErrorShowing() { return ERR_RE.test(errTextNow()); }
+  function limitShowing() { return LIMIT_RE.test(errTextNow()); }
+  function automatedShowing() { try { return AUTO_RE.test(document.body.innerText || ''); } catch (e) { return false; } }
+  function pageDead() {   // "Hmm... this page doesn't exist" / post deleted / account suspended (permanent, not a retry case)
+    try {
+      if (document.querySelector('article[data-testid="tweet"]')) return false;
+      var roots = document.querySelectorAll('[data-testid="error-detail"], main [role="alert"], [data-testid="primaryColumn"]');
+      for (var i = 0; i < roots.length; i++) { var t = (roots[i].innerText || roots[i].textContent || '').trim(); if (t.length && t.length <= 400 && DEAD_RE.test(t)) return true; }
+    } catch (e) {}
+    return false;
+  }
+  function toastDead() { try { var t = $$('[data-testid="toast"],[role="alert"]').map(function (x) { return x.textContent || ''; }).join(' '); return DEAD_RE.test(t); } catch (e) { return false; } }
+  function timelineError() {   // X's "Something went wrong. Try reloading." + Retry button (the button does not really work -> full reload)
+    try {
+      var col = document.querySelector('[data-testid="primaryColumn"]') || document.body, btns = col.querySelectorAll('button, [role="button"]');
+      for (var i = 0; i < btns.length; i++) if (/^\s*retry\s*$/i.test(btns[i].innerText || '')) return true;
+    } catch (e) {}
+    return false;
+  }
+  function loginWall() { return /^\/(login|i\/flow\/login|i\/flow\/signup|i\/flow\/logout)/.test(location.pathname); }
+  async function waitOnline(ms) { var end = Date.now() + ms; while (!navigator.onLine && Date.now() < end && cfg.auto) await sleep(1000); return navigator.onLine; }
+  async function reloadForError(why) {   // cap: 3 reloads / 10 min so it can never loop forever
+    try {
+      var now = Date.now(), log = [];
+      try { log = JSON.parse(sessionStorage.getItem('zenEngReloadLog') || '[]').filter(function (t) { return now - t < 600000; }); } catch (e) {}
+      if (log.length >= 3) { toast('Feed keeps failing - reload limit reached (3 / 10 min)', 'warn'); return false; }
+      log.push(now); try { sessionStorage.setItem('zenEngReloadLog', JSON.stringify(log)); } catch (e) {}
+      writeRun(); toast('Feed failed to load (' + (why || 'error') + ') - refreshing page...', 'warn');
+      logEv({ k: 'error', e: curMode() || '', m: 'Feed error (' + (why || 'error') + ') - page reloaded' });
+      await sleep(800); location.reload(); return true;
+    } catch (e) { return false; }
+  }
+  function byText(root, re) {
+    var els = (root || document).querySelectorAll('button, [role="button"]');
+    for (var i = 0; i < els.length; i++) if (re.test((els[i].innerText || els[i].textContent || '').trim())) return els[i];
+    return null;
+  }
+  async function recoverPostError() {   // Back arrow -> "Save post?" -> Discard
+    try {
+      var back = document.querySelector('[data-testid="app-bar-back"], [aria-label="Back"], [data-testid="app-bar-close"], [aria-label="Close"]');
+      if (back) await tap(back);
+      for (var i = 0; i < 20; i++) {
+        await sleep(250);
+        var dlg = document.querySelector('[role="alertdialog"], [data-testid="confirmationSheetDialog"], [role="dialog"], [aria-modal="true"]');
+        var disc = byText(dlg || document, /^discard$/i) || document.querySelector('[data-testid="confirmationSheetConfirm"]');
+        if (disc) { await tap(disc); break; }
+        if (!document.querySelector('[data-testid="tweetTextarea_0"]') && !/\/compose\//.test(location.pathname)) break;
+      }
+      await sleep(700);
+    } catch (e) {}
+  }
+  // Safety: 3x "Something went wrong" after Reply in ONE run (SEA + FED together) -> stop everything
+  function safetyHit() {
+    var n = 0; try { n = Number(sessionStorage.getItem('zenEngSafe') || 0) || 0; } catch (e) {}
+    n++; try { sessionStorage.setItem('zenEngSafe', String(n)); } catch (e) {}
+    if (n >= 3) {
+      patchCfg({ auto: false }); fatalMsg = 'SAFETY STOP: 3x "Something went wrong" in one run - take a break';
+      logEv({ k: 'error', e: curMode() || '', m: fatalMsg }); toast('System auto stopped for safety reasons, take some break buddy', 'warn'); return true;
+    }
+    return false;
+  }
+  // Extra Safety 1: after "Something went wrong" click Reply once more. If X still blocks it with "might be automated" ->
+  // discard, reload, Home -> scroll -> like 2-3 -> Profile -> scroll -> back to the saved page.
+  async function es1Retry(ed) {   // -> 'ok' | 'fail' | 'routine'
+    try {
+      toast('Error - trying Reply once more...', 'warn'); await sleep(rnd(1800, 3200));
+      var b = submitBtn(ed); if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return 'fail';
+      await tap(b);
+      var t0 = Date.now(); while (Date.now() - t0 < 5000) { await sleep(150); if (postErrorShowing()) break; }
+      if (!postErrorShowing()) return 'ok';
+      await sleep(600); if (!automatedShowing()) return 'fail';
+      logEv({ k: 'error', e: curMode() || '', m: 'Automated-request block - running cool-down routine' });
+      var url = goodUrl || 'https://x.com/home';
+      await recoverPostError(); writeRun();
+      try { sessionStorage.setItem('zenEs1Job', JSON.stringify({ ts: Date.now(), url: url })); } catch (e) {}
+      es1Busy = true; location.href = url; return 'routine';
+    } catch (e) { return 'fail'; }
+  }
+  async function es1Scroll(ms) { var end = Date.now() + ms; while (Date.now() < end) { window.scrollBy({ top: rnd(250, 520), behavior: 'smooth' }); await sleep(rnd(700, 1300)); } }
+  async function es1Routine(job) {
+    es1Busy = true;
+    try {
+      toast('Cooling down like a normal user...', 'warn');
+      await waitFor(function () { return document.querySelector('article'); }, 15000); await sleep(rnd(1500, 2500));
+      var home = document.querySelector('a[data-testid="AppTabBar_Home_Link"], a[href="/home"]');
+      if (home) { await tap(home); await waitFor(function () { return /\/home/.test(location.pathname) && document.querySelector('article'); }, 10000); }
+      await sleep(rnd(1500, 2500)); await es1Scroll(rnd(5000, 8000));
+      var liked = 0, want = 2 + Math.floor(Math.random() * 2);
+      for (var t = 0; t < 10 && liked < want; t++) {
+        var btns = $$('article [data-testid="like"]').filter(function (b) { var r = b.getBoundingClientRect(); return r.width > 0 && r.top > 90 && r.bottom < window.innerHeight - 70; });
+        if (btns.length) { await tap(btns[Math.floor(Math.random() * btns.length)]); liked++; await sleep(rnd(1500, 3000)); }
+        window.scrollBy({ top: rnd(300, 600), behavior: 'smooth' }); await sleep(rnd(1200, 2200));
+      }
+      var prof = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+      if (prof) { await tap(prof); await waitFor(function () { return document.querySelector('[data-testid="UserName"], [data-testid="primaryColumn"] article'); }, 10000); await sleep(rnd(1000, 1800)); await es1Scroll(rnd(3000, 4000)); }
+    } catch (e) {}
+    try { sessionStorage.removeItem('zenEs1Job'); } catch (e) {}
+    location.href = (job && job.url) || 'https://x.com/home';
+  }
+  function es1Check() {
+    try {
+      var raw = sessionStorage.getItem('zenEs1Job'); if (!raw) return;
+      var job = JSON.parse(raw); es1Busy = true;
+      if (!job || Date.now() - job.ts > 240000) { sessionStorage.removeItem('zenEs1Job'); es1Busy = false; return; }
+      setTimeout(function () { es1Routine(job); }, 2500);
     } catch (e) {}
   }
   async function waitClose(ed) { var t0 = Date.now(); while (ed && ed.isConnected && Date.now() - t0 < 60000) await sleep(150); }
@@ -481,6 +623,8 @@
     if (statusPageId() !== sid) {   // wrong post opened: step back out, reply the normal way
       es2Abort(); history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); await sleep(800); return null;
     }
+    var dead = await waitFor(function () { return pageDead() || toastDead(); }, 1500);
+    if (dead) return { dead: true };
     var art = await waitFor(function () {
       var x = articles().filter(function (y) { return statusId(y) === sid; })[0];
       return x && x.querySelector('[data-testid="reply"]') ? x : null;
@@ -543,13 +687,14 @@
         try {
           var r2 = await es2Enter(a, eng);
           if (r2 && r2.off) { var e2 = new Error('comments off'); e2.off = true; throw e2; }
+          if (r2 && r2.dead) { var e4 = new Error('Post deleted / unavailable'); e4.dead = true; throw e4; }
           if (r2 && r2.art) ar = r2.art;
           else if (!a.isConnected) {   // we stepped back out: the feed re-rendered, find this post again
             var re = await waitFor(function () { return articles().filter(function (y) { return statusId(y) === sid; })[0]; }, 5000);
             if (re) ar = re;
           }
         } catch (e3) {
-          if (e3 && e3.off) throw e3;
+          if (e3 && (e3.off || e3.dead)) throw e3;
           es2Abort(); if (statusPageId()) { history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); }
         }
       }
@@ -569,7 +714,9 @@
       toast(posted ? 'Reply posted' : 'Reply drafted — review & tap Reply', 'success');
       return true;
     } catch (err) {
-      if (err && err.off) { skipped[sid] = 1; markReplied(sid, 'off'); btn.remove(); await closeComposer(); logEv({ k: 'off', e: eng, id: sid, a: author(a) || '' }); toast('Comments off — skipped', 'warn'); }
+      if (err && err.dead) { skipped[sid] = 1; markReplied(sid, 'deleted'); btn.remove(); logEv({ k: 'error', e: eng, id: sid, a: author(a) || '', m: 'Post deleted / unavailable - skipped' }); toast('Post deleted / unavailable - skipped', 'warn'); if (!statusPageId()) await closeComposer(); }
+      else if (err && (err.xerr || err.limit)) { logEv({ k: 'error', e: eng, id: sid, a: author(a) || '', m: String(err.message).slice(0, 120), tone: usedTone }); btn.innerHTML = html; btn.disabled = false; toast(err.safety ? 'Safety stop: 3x Something went wrong' : String(err.message), 'error'); }
+      else if (err && err.off) { skipped[sid] = 1; markReplied(sid, 'off'); btn.remove(); await closeComposer(); logEv({ k: 'off', e: eng, id: sid, a: author(a) || '' }); toast('Comments off — skipped', 'warn'); }
       else { logEv({ k: 'error', e: eng, id: sid, a: author(a) || '', m: String((err && err.message) || 'Reply failed').slice(0, 120), tone: usedTone }); btn.innerHTML = html; btn.disabled = false; toast(String((err && err.message) || 'Reply failed'), 'error'); await closeComposer(); }
       return false;
     } finally { busy.delete(a); if (es2Back) await es2Return(); }
@@ -606,13 +753,13 @@
   }
   async function waitMore(prev) {
     var t0 = Date.now();
-    while (Date.now() - t0 < 15000) { var c = postIds(); for (var k in c) if (!prev[k]) return true; await sleep(400); }
+    while (Date.now() - t0 < 15000) { var c = postIds(); for (var k in c) if (!prev[k]) return true; if (timelineError()) return false; await sleep(400); }
     return false;
   }
   // run state survives a page reload (sessionStorage), so "Replied x / max" keeps counting across feed refreshes
   function readRun() { try { var r = JSON.parse(sessionStorage.getItem('zenEngRun') || 'null'); if (r && Date.now() - r.t < 600000) return r; } catch (e) {} return null; }
   function writeRun(extra) { try { var r = readRun() || { done: 0, skip: 0, empty: 0 }; r.done = stat.done; r.skip = stat.skip; r.t = Date.now(); if (extra) for (var k in extra) r[k] = extra[k]; sessionStorage.setItem('zenEngRun', JSON.stringify(r)); } catch (e) {} }
-  function clearRun() { try { sessionStorage.removeItem('zenEngRun'); } catch (e) {} }
+  function clearRun() { try { sessionStorage.removeItem('zenEngRun'); sessionStorage.removeItem('zenEngSafe'); } catch (e) {} }
 
   async function autoLoop(eng) {
     if (autoRunning) return;
@@ -625,8 +772,15 @@
     var none = 0, cls = tag[eng], reloading = false, stopMsg = '';
     try {
       while (cfg.auto && curMode() === eng && runCount < ecfg(eng, 'Max')) {
+        if (loginWall()) { stopMsg = 'X logged out - log in again'; break; }
+        if (!navigator.onLine) { setStat('Offline - waiting for connection'); if (!(await waitOnline(300000))) { stopMsg = 'No internet for 5 min'; break; } }
+        if (fatalMsg) { stopMsg = fatalMsg; fatalMsg = ''; break; }
         var target = articles().filter(function (a) { var b = a.querySelector('.' + cls); return b && !b.disabled && !autoSkip.has(a) && !busy.has(a); })[0];
         if (!target) {
+          if (timelineError()) {
+            await sleep(1500);
+            if (timelineError()) { if (await reloadForError('Something went wrong')) { reloading = true; return; } stopMsg = 'Feed keeps failing (3 reloads / 10 min)'; break; }
+          }
           none++;
           if (eng === 'SEA' && cfg.ageOn && Object.keys(oldSeen).length >= 4) { stopMsg = 'Reached posts older than the age limit'; break; }
           if (none > 3) {
@@ -645,6 +799,8 @@
         cycleT0 = Date.now();
         var ok = await handleClick(target, btn, eng);
         runCount++;
+        if (fatalMsg) { stopMsg = fatalMsg; fatalMsg = ''; break; }
+        if (es1Busy) { reloading = true; return; }
         if (ok) { emptyReloads = 0; writeRun({ empty: 0 }); }
         if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s2 = statusId(target); if (s2) skipped[s2] = 1; await closeComposer(); await sleep(1200); continue; }
         await waitClose(lastEditor);
@@ -672,6 +828,8 @@
   }
   function scan() {
     cfg = loadCfg();
+    if (!/\/compose\/|\/status\//.test(location.pathname) && !loginWall()) goodUrl = location.href;
+    if (es1Busy) return;   // Extra Safety 1 cool-down routine is running
     if (es2Back && Date.now() - es2Back.ts < 240000) return;   // Extra Safety 2 detour: do not touch the page
     var m = curMode();
     if (m !== lastMode) { teardown(); lastMode = m; if (m) toast(m + ' engine ON — buttons appear on posts', 'success'); }
@@ -738,6 +896,7 @@
   }
 
   function boot() {
+    es1Check();
     buildPanel();
     setInterval(function () { try { buildPanel(); scan(); renderPanel(); placeUi(); } catch (e) {} }, 1000);
     try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', placeUi); window.visualViewport.addEventListener('scroll', placeUi); } } catch (e) {}
