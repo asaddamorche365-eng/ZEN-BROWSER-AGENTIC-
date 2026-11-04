@@ -78,7 +78,8 @@
   }
   var ownH = null, ownLearned = null;
   function ownHandle() {
-    if (ownLearned) return ownLearned;   // composer avatar = ground truth
+    if (ownLearned) return ownLearned;
+    try { var cached = localStorage.getItem('zenEngOwn'); if (cached) { ownLearned = cached; return ownLearned; } } catch (e) {}   // composer avatar = ground truth
     var mh = String(cfg.myHandle || '').replace(/^@/, '').trim().toLowerCase();
     if (mh) return mh;
     if (ownH) return ownH;
@@ -104,7 +105,7 @@
     var av = $$('[data-testid^="UserAvatar-Container-"]', d); if (!av.length) return;
     var id = (av[av.length - 1].getAttribute('data-testid') || '').replace('UserAvatar-Container-', '').toLowerCase();
     if (/^[a-z0-9_]{1,15}$/.test(id) && id !== ownLearned) {
-      var had = ownHandle(); ownLearned = id;
+      var had = ownHandle(); ownLearned = id; try { localStorage.setItem('zenEngOwn', id); } catch (e) {}
       if (had !== id) toast('Your account detected: @' + id, 'success');
     }
   }
@@ -400,19 +401,34 @@
     while (Date.now() - t0 < 15000) { var c = postIds(); for (var k in c) if (!prev[k]) return true; await sleep(400); }
     return false;
   }
+  // run state survives a page reload (sessionStorage), so "Replied x / max" keeps counting across feed refreshes
+  function readRun() { try { var r = JSON.parse(sessionStorage.getItem('zenEngRun') || 'null'); if (r && Date.now() - r.t < 600000) return r; } catch (e) {} return null; }
+  function writeRun(extra) { try { var r = readRun() || { done: 0, skip: 0, empty: 0 }; r.done = stat.done; r.skip = stat.skip; r.t = Date.now(); if (extra) for (var k in extra) r[k] = extra[k]; sessionStorage.setItem('zenEngRun', JSON.stringify(r)); } catch (e) {} }
+  function clearRun() { try { sessionStorage.removeItem('zenEngRun'); } catch (e) {} }
+
   async function autoLoop(eng) {
     if (autoRunning) return;
-    autoRunning = true; runCount = 0; stat.done = 0; stat.skip = 0; skipSeen = {}; setStat('Detecting your account');
+    autoRunning = true; skipSeen = {};
+    var rs = readRun(); stat.done = rs ? rs.done : 0; stat.skip = rs ? rs.skip : 0; runCount = stat.done;
+    var emptyReloads = rs ? (rs.empty || 0) : 0;
+    setStat('Detecting your account');
     if (!(await probeOwnHandle())) { autoRunning = false; patchCfg({ auto: false }); setStat('Stopped'); toast('Could not detect your account. Set My @handle in Engine settings.', 'warn'); return; }
     setStat('Running');
-    var none = 0, cls = tag[eng];
+    var none = 0, cls = tag[eng], reloading = false, stopMsg = '';
     try {
       while (cfg.auto && curMode() === eng && runCount < cfg.maxRun) {
         var target = articles().filter(function (a) { var b = a.querySelector('.' + cls); return b && !b.disabled && !autoSkip.has(a) && !busy.has(a); })[0];
         if (!target) {
           none++;
-          if (eng === 'SEA' && cfg.ageOn && Object.keys(oldSeen).length >= 4) { toast('Reached posts older than the age limit — stopped', 'success'); break; }
-          if (none > 6) { toast('No more posts — auto stopped', 'success'); break; }
+          if (eng === 'SEA' && cfg.ageOn && Object.keys(oldSeen).length >= 4) { stopMsg = 'Reached posts older than the age limit'; break; }
+          if (none > 3) {
+            // nothing new after scrolling (also happens when the page is not being rendered in background): reload the feed and continue
+            if (emptyReloads >= 5) { stopMsg = 'Nothing new to reply to after 5 refreshes'; break; }
+            var rw = Math.round(rnd(12, 25)); setStat('No new posts, refreshing in ' + rw + 's');
+            for (var q = 0; q < rw && cfg.auto; q++) await sleep(1000);
+            if (!cfg.auto) break;
+            emptyReloads++; writeRun({ empty: emptyReloads }); reloading = true; location.reload(); return;
+          }
           setStat('Scrolling for new posts'); var prev = postIds(); await scrollDown(); await waitMore(prev); await sleep(1200); continue;
         }
         none = 0;
@@ -420,15 +436,21 @@
         await ensureVisible(target);
         var ok = await handleClick(target, btn, eng);
         runCount++;
-        if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s = statusId(target); if (s) skipped[s] = 1; await closeComposer(); await sleep(1200); continue; }
+        if (ok) { emptyReloads = 0; writeRun({ empty: 0 }); }
+        if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s2 = statusId(target); if (s2) skipped[s2] = 1; await closeComposer(); await sleep(1200); continue; }
         await waitClose(lastEditor);
         var pw = rnd(cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)); setStat('Waiting ' + Math.round(pw) + 's'); await sleep(pw * 1000);
       }
+      if (!stopMsg && runCount >= cfg.maxRun && cfg.auto) stopMsg = 'Max per run reached';
     } catch (e) { toast(String(e && e.message || e), 'error'); }
     finally {
-      autoRunning = false; setStat(cfg.auto ? 'Stopped' : 'Idle');
-      if (runCount >= cfg.maxRun && cfg.auto) toast('Max per run reached — auto stopped', 'success');
-      if (cfg.auto && (runCount >= cfg.maxRun || none > 6 || Object.keys(oldSeen).length >= 4)) { patchCfg({ auto: false }); }
+      autoRunning = false;
+      if (!reloading) {
+        setStat(cfg.auto ? 'Stopped' : 'Idle');
+        if (stopMsg) { toast(stopMsg + ' - auto stopped', 'success'); setStat(stopMsg); }
+        if (cfg.auto && (stopMsg || runCount >= cfg.maxRun)) patchCfg({ auto: false });
+        if (!cfg.auto) clearRun();
+      }
     }
   }
 
@@ -473,7 +495,7 @@
       if (cfg.auto) { patchCfg({ auto: false }); setStat('Stopping'); }
       else if (!(cfg.sea || cfg.fed)) toast('Turn on SEA or FED first', 'warn');
       else if (!curMode()) toast('Open x.com/search (SEA) or x.com/home (FED)', 'warn');
-      else { patchCfg({ auto: true }); scan(); }
+      else { clearRun(); stat.done = 0; stat.skip = 0; patchCfg({ auto: true }); scan(); }
     } else if (act === 'settings') {
       if (window.ZenEng && window.ZenEng.openSettings) window.ZenEng.openSettings(); else toast('Update the app to open Engine settings', 'warn');
     }
