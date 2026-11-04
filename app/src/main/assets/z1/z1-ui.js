@@ -42,12 +42,8 @@
   // ---------- css ----------
   var css = document.createElement('style');
   css.textContent = [
-    '#zl-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:2147482500;display:flex;background:rgba(13,13,18,.96);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom,0)}',
-    '#zl-tabbar.hide{display:none}',
-    '.zl-tb{flex:1;background:none;border:0;color:var(--muted);padding:8px 2px 7px;font:700 9px Space Mono,monospace;letter-spacing:.5px;display:flex;flex-direction:column;align-items:center;gap:3px}',
-    '.zl-tb svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}',
-    '.zl-tb.on{color:var(--accent3)}',
-    'body.zl-tb-on .screen{padding-bottom:62px}',
+    '.zl-back{display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--border2);border-radius:20px;color:var(--text);font:700 11px Space Mono,monospace;letter-spacing:.5px;padding:7px 13px 7px 9px;margin:12px 0 0 14px}',
+    '.zl-back svg{width:14px;height:14px;stroke:var(--accent3);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}',
     '.zl-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}',
     '.zl-st{background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:11px 12px;min-height:72px}',
     '.zl-st .k{font:700 9px Space Mono,monospace;letter-spacing:1px;color:var(--muted)}',
@@ -96,42 +92,31 @@
   };
 
   // ---------- navigation ----------
-  function closeProfile() { var p = $('zp-profile'); if (p) p.classList.remove('open'); }
-  function goHome() { closeProfile(); try { closeMainMenu(); } catch (e) {} showScreen('home'); }
-  function goEngine() { closeProfile(); if (window.zlGo) window.zlGo('engine'); }
-  function goHistory() { closeProfile(); try { closeMainMenu(); } catch (e) {} showScreen('history'); }
-  function goStats() { closeProfile(); try { closeMainMenu(); } catch (e) {} showScreen('zstats'); }
-  function goProfile() { if (window.zlOpenProfile) window.zlOpenProfile(); setTimeout(markTabs, 30); }
+  function goHome() { try { closeMainMenu(); } catch (e) {} showScreen('home'); }
+  function goEngine() { if (window.zlGo) window.zlGo('engine'); }
+  function goHistory() { try { closeMainMenu(); } catch (e) {} showScreen('history'); }
+  function goStats() { try { closeMainMenu(); } catch (e) {} showScreen('zstats'); }
+  function goProfile() { try { closeMainMenu(); } catch (e) {} if (typeof openProfileSheet === 'function') openProfileSheet(); }
+  function goUpload() { try { closeMainMenu(); } catch (e) {} try { showScreen((typeof fileQueue !== 'undefined' && fileQueue.length) ? 'dashboard' : 'upload'); } catch (x) {} }
   window.zlGoHome = goHome; window.zlGoHistory = goHistory; window.zlGoStats = goStats;
 
-  var tabbar = null;
-  function buildTabbar() {
-    if ($('zl-tabbar')) { tabbar = $('zl-tabbar'); return; }
-    tabbar = document.createElement('div'); tabbar.id = 'zl-tabbar';
-    var T = [['home', 'HOME', goHome], ['engine', 'ENGINE', goEngine], ['history', 'HISTORY', goHistory], ['stats', 'STATS', goStats], ['profile', 'PROFILE', goProfile]];
-    T.forEach(function (t) {
-      var b = document.createElement('button'); b.className = 'zl-tb'; b.setAttribute('data-t', t[0]);
-      b.innerHTML = IC[t[0]] + '<span>' + t[1] + '</span>';
-      b.onclick = t[2]; tabbar.appendChild(b);
-    });
-    document.body.appendChild(tabbar);
-    document.body.classList.add('zl-tb-on');
-  }
-  function curTab() {
-    var p = $('zp-profile'); if (p && p.classList.contains('open')) return 'profile';
-    var s = document.querySelector('.screen.active'), id = s ? s.id : '';
-    if (id === 'home-screen') return 'home';
-    if (id === 'engine-screen') return 'engine';
-    if (id === 'history-screen') return 'history';
-    if (id === 'zstats-screen') return 'stats';
-    return '';
+  // ---------- back pill: every sub screen gets a "< Home" button at the top (no bottom tab bar any more) ----------
+  var BACK_SCREENS = ['engine-screen', 'history-screen', 'zstats-screen', 'upload-screen', 'dashboard-screen'];
+  function ensureBack(el) {
+    if (!el || el.querySelector('.zl-back')) return;
+    var b = document.createElement('button'); b.className = 'zl-back'; b.type = 'button';
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg> Home';
+    b.onclick = goHome;
+    el.insertBefore(b, el.firstChild);
   }
   function markTabs() {
-    if (!tabbar) return;
-    var c = curTab(), s = document.querySelector('.screen.active');
-    tabbar.classList.toggle('hide', !!(s && s.id === 'main-screen'));      // the generator has its own bottom bar
-    document.body.classList.toggle('zl-tb-on', !(s && s.id === 'main-screen'));
-    [].forEach.call(tabbar.querySelectorAll('.zl-tb'), function (b) { b.classList.toggle('on', b.getAttribute('data-t') === c); });
+    BACK_SCREENS.forEach(function (id) { var el = $(id); if (el) ensureBack(el); });
+  }
+  var obs = null;
+  function watchBack() {
+    if (obs || !window.MutationObserver) return;
+    obs = new MutationObserver(function () { markTabs(); });
+    ['engine-screen', 'history-screen', 'zstats-screen'].forEach(function (id) { var el = $(id); if (el) obs.observe(el, { childList: true }); });
   }
 
   // wrap showScreen: render the new screens on entry, keep the tab bar in sync
@@ -161,6 +146,7 @@
     el.innerHTML = '<div class="zp-wrap">' +
       '<div class="zp-h">Z.1</div><div class="zp-sub">HOME' + (user ? ' · @' + esc(user) : '') + '</div>' +
       '<button class="zl-go" id="hm-x">▶ Start in X</button>' +
+      '<div class="zl-st tap" id="hm-gen" style="min-height:0;margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="font-size:26px">📁</div><div><div class="k">UPLOAD POST LIST</div><div class="s" style="font-size:11px">add a .txt file · generate replies</div></div></div>' +
       '<div class="zl-grid">' +
       '<div class="zl-st tap' + (e.sea ? ' on' : '') + '" id="hm-sea"><div class="k">SEA · SEARCH</div><div class="v">' + (e.sea ? 'ON' : 'OFF') + '</div><div class="s">tap to switch</div></div>' +
       '<div class="zl-st tap' + (e.fed ? ' on' : '') + '" id="hm-fed"><div class="k">FED · HOME FEED</div><div class="v">' + (e.fed ? 'ON' : 'OFF') + '</div><div class="s">tap to switch</div></div>' +
@@ -174,14 +160,13 @@
       '<button class="zl-sc" id="hm-s-sta">' + IC.stats + 'STATS</button>' +
       '<button class="zl-sc" id="hm-s-pro">' + IC.profile + 'PROFILE</button></div>' +
       '<div class="zp-card"><div class="zp-lbl">RECENT</div>' + rec + '</div>' +
-      '<button class="zp-btn ghost" id="hm-gen">File generator (upload posts)</button>' +
       '</div>';
     $('hm-x').onclick = function () { try { if (B && B.openX) B.openX(); else say('Open the X tab', 'error'); } catch (x) {} };
     $('hm-sea').onclick = function () { var n = !cfgGet().sea; cfgSet({ sea: n }); renderHome(); };
     $('hm-fed').onclick = function () { var n = !cfgGet().fed; cfgSet({ fed: n }); renderHome(); };
     $('hm-keys').onclick = goProfile;
     $('hm-s-eng').onclick = goEngine; $('hm-s-his').onclick = goHistory; $('hm-s-sta').onclick = goStats; $('hm-s-pro').onclick = goProfile;
-    $('hm-gen').onclick = function () { try { showScreen((typeof fileQueue !== 'undefined' && fileQueue.length) ? 'dashboard' : 'upload'); } catch (x) {} };
+    $('hm-gen').onclick = goUpload;
   }
 
   // ---------- event row (History + Home recent) ----------
@@ -420,17 +405,130 @@
   };
   function big(cfg) { return !!cfg.bigOn && String(cfg.bigWords || '').trim(); }
 
+  // ---------- PROFILE: the old profile sheet (as before) + the new settings added in the same style ----------
+  var PF_P = 'zl_profile', PF_K = 'zl_keys', PF_G = 'zl_z1g', PF_SP = 'zl_splash_off';
+  function jset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function nativeKeys() { try { return JSON.parse(B.engKeysGet()) || {}; } catch (e) { return {}; } }
+  function pfFld(id, label, val, type, ph) {
+    return '<div class="field-label" style="margin:8px 0 5px">' + label + '</div>' +
+      '<input class="field-input" id="' + id + '" type="' + type + '" value="' + esc(val) + '" placeholder="' + esc(ph || '') + '" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%">';
+  }
+  function pfBadge(on, name) { return '<span class="profile-badge" style="display:inline-flex;margin:0 6px 6px 0;' + (on ? 'color:#6ee7b7' : '') + '">' + name + (on ? ' ✓' : '') + '</span>'; }
+  function pfBlock() {
+    var box = document.querySelector('#profile-sheet .sheet-box'); if (!box) return;
+    var card = box.querySelector('.profile-card'); if (!card) return;
+    var p = jget(PF_P, {}), k = jget(PF_K, {}), g = jget(PF_G, {}), n = nativeKeys();
+    ['gem', 'groq', 'oai'].forEach(function (x) { if (n[x] && !k[x]) k[x] = n[x]; });
+    var host = $('zl-pf-block');
+    if (!host) { host = document.createElement('div'); host.id = 'zl-pf-block'; card.parentNode.insertBefore(host, card.nextSibling); }
+    host.innerHTML = '<div class="profile-section-label" style="margin-bottom:6px;">Connections</div>' +
+      '<div class="z1tf-section">' +
+      '<div class="z1tf-section-title">🔑 X ACCOUNT + API KEYS</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.6;font-family:\'Space Mono\',monospace;">Saved on this device only. Used by Z1 and the Engine.</div>' +
+      '<div>' + pfBadge(!!k.gem, 'Gemini') + pfBadge(!!k.groq, 'Z1-G / Groq') + pfBadge(!!k.oai, 'OpenAI') + '</div>' +
+      pfFld('zl-pf-user', 'X username (without @)', p.xUsername || '', 'text', 'yourhandle') +
+      pfFld('zl-pf-gem', 'Gemini API key', k.gem || '', 'password', 'AIza...') +
+      pfFld('zl-pf-groq', 'Z1-G (Groq) API key', k.groq || '', 'password', 'gsk_...') +
+      pfFld('zl-pf-oai', 'OpenAI API key', k.oai || '', 'password', 'sk-...') +
+      '<div class="field-label" style="margin:8px 0 5px">Z1-G custom prompt (optional)</div>' +
+      '<textarea class="field-input" id="zl-pf-z1g" rows="4" style="width:100%;resize:vertical;font-size:11px" placeholder="Personality / system prompt for Z1-G">' + esc(g.prompt || '') + '</textarea>' +
+      '<div id="zl-pf-err" style="display:none;color:#f87171;font-size:12px;margin-top:8px"></div>' +
+      '<button id="zl-pf-save" class="field-btn" style="width:100%;padding:11px;margin-top:10px">Save</button>' +
+      '</div>';
+    $('zl-pf-save').onclick = function () {
+      var u = $('zl-pf-user').value.trim().replace(/^@/, '');
+      if (u && !/^[A-Za-z0-9_]{1,15}$/.test(u)) { var er = $('zl-pf-err'); er.style.display = 'block'; er.textContent = 'Enter a valid X username (letters, numbers, underscore).'; return; }
+      var pr = jget(PF_P, {}); if (u) { pr.xUsername = u; pr.manual = true; } jset(PF_P, pr);
+      var kk = { gem: $('zl-pf-gem').value.trim(), groq: $('zl-pf-groq').value.trim(), oai: $('zl-pf-oai').value.trim() };
+      jset(PF_K, kk); try { if (B && B.engKeysSet) B.engKeysSet(JSON.stringify(kk)); } catch (e) {}
+      jset(PF_G, { prompt: $('zl-pf-z1g').value });
+      try { if (typeof zlApply === 'function') zlApply(); } catch (e) {}
+      say('Saved'); pfBlock(); try { renderHome(); } catch (e) {}
+    };
+  }
+  function pfExtraRows() {
+    // Splash toggle: Preferences, right after the 12-hour clock row
+    var ck = $('profile-clock-toggle');
+    if (ck && !$('profile-splash-toggle')) {
+      var row = ck.parentNode, r = document.createElement('div');
+      r.className = 'profile-row'; r.style.cssText = 'cursor:default;margin-bottom:7px;';
+      r.innerHTML = '<div class="profile-row-left"><span class="profile-row-icon">🖼</span> <span>Splash Images</span></div><button class="profile-toggle" id="profile-splash-toggle"><div class="profile-toggle-knob"></div></button>';
+      row.parentNode.insertBefore(r, row.nextSibling);
+      $('profile-splash-toggle').onclick = function () {
+        var on = !this.classList.contains('on'); this.classList.toggle('on', on);
+        try { localStorage.setItem(PF_SP, on ? '0' : '1'); } catch (e) {}
+        say(on ? 'Splash images ON' : 'Splash images OFF');
+      };
+    }
+    var sp = $('profile-splash-toggle'); if (sp) sp.classList.toggle('on', localStorage.getItem(PF_SP) !== '1');
+    // Account: Engine settings row + working Support row
+    var rows = document.querySelectorAll('#profile-sheet .profile-row');
+    for (var i = 0; i < rows.length; i++) {
+      var oc = rows[i].getAttribute('onclick') || '';
+      if (/openSettings\(\)/.test(oc) && !$('zl-pf-engine')) {
+        var e = document.createElement('div'); e.className = 'profile-row'; e.id = 'zl-pf-engine';
+        e.innerHTML = '<div class="profile-row-left"><span class="profile-row-icon">⚡</span> Engine Settings</div><span class="profile-row-arrow">›</span>';
+        e.onclick = function () { closeProfileSheet(); goEngine(); };
+        rows[i].parentNode.insertBefore(e, rows[i]);
+      }
+      if (/openSupport\(\)/.test(oc)) {
+        rows[i].setAttribute('onclick', 'zlSupport()');
+      }
+    }
+  }
+  window.zlSupport = function () {
+    try { closeProfileSheet(); } catch (e) {}
+    try {
+      showProfileInfoModal('Support', 'Z1 now runs fully on this device, so there is no support server or ticket system. If something does not work: 1) Profile → check your X username and API keys are saved. 2) Open the X tab and make sure you are logged in. 3) Engine → check SEA/FED and Tone. 4) History shows the error line for every failed reply.');
+    } catch (e) {}
+  };
+
+  // Z1EN TF code: stored on this device (the old server database is gone)
+  function tfCode() {
+    var c = ''; try { c = localStorage.getItem('zl_tf_code') || ''; } catch (e) {}
+    if (!c) {
+      try { c = (typeof _genTFCode === 'function') ? _genTFCode() : ''; } catch (e) {}
+      if (!c) { var A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; for (var i = 0; i < 8; i++) c += A.charAt(Math.floor(Math.random() * A.length)); }
+      try { localStorage.setItem('zl_tf_code', c); } catch (e) {}
+    }
+    return c;
+  }
+  window.loadZ1TFProfile = function () {
+    var c = $('z1tf-profile-code'); if (c) c.textContent = tfCode();
+    var st = $('z1tf-profile-status'); if (st) { st.textContent = 'Extension not connected'; st.style.color = 'var(--muted)'; }
+  };
+  window.regenZ1TFCode = function () {
+    try { localStorage.removeItem('zl_tf_code'); } catch (e) {}
+    window.loadZ1TFProfile(); say('New code generated');
+  };
+
+  var _ops = window.openProfileSheet;
+  window.openProfileSheet = function () {
+    var r = _ops.apply(this, arguments);
+    try { pfBlock(); pfExtraRows(); window.loadZ1TFProfile(); } catch (e) { try { console.warn('z1-ui profile', e); } catch (e2) {} }
+    return r;
+  };
+
+  // menu: Upload Post List entry under Home
+  function menuExtra() {
+    if ($('mmenu-upload')) return;
+    var h = $('home-btn'); if (!h || !h.parentNode) return;
+    var it = document.createElement('div'); it.className = 'mmenu-item'; it.id = 'mmenu-upload';
+    it.innerHTML = '<div class="mmenu-icon" style="display:flex;align-items:center;justify-content:center;font-size:18px">📁</div><div class="mmenu-text"><div class="mmenu-label">Upload Post List</div><div class="mmenu-sub">Add a .txt file · generate replies</div></div>';
+    it.onclick = goUpload;
+    h.parentNode.insertBefore(it, h.nextSibling);
+  }
+
   // ---------- boot ----------
   function boot() {
-    buildTabbar();
     var m = $('home-screen'); if (!m) { var host = $('main-screen') ? $('main-screen').parentNode : $('app'); m = document.createElement('div'); m.className = 'screen'; m.id = 'home-screen'; host.appendChild(m); }
     ensureHistRoot(); ensureStatsRoot();
     try { lastCfg = B.engCfgGet(); } catch (e) {}
     var s = document.querySelector('.screen.active');
     if (s && s.id === 'home-screen') renderHome();
     // old menu "Stats" / "History" / "Dashboard" entries now open the new screens
-    markTabs();
-    setInterval(markTabs, 1500);
+    markTabs(); watchBack(); menuExtra();
+    setInterval(function () { markTabs(); watchBack(); }, 1500);
   }
   window.zlHomeRender = renderHome;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 80); }); else setTimeout(boot, 80);
