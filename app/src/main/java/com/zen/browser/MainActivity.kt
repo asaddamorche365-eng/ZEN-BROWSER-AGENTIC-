@@ -706,7 +706,15 @@ class MainActivity : Activity() {
     inner class EngBridge(private val owner: WebView) {
         @JavascriptInterface
         fun gen(prompt: String, callbackId: String) {
-            val host = try { Uri.parse(owner.url ?: "").host } catch (e: Exception) { null }
+            // WebView.getUrl() must run on the UI thread; JS bridge calls arrive on a background thread
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var pageUrl = ""
+            runOnUiThread {
+                try { pageUrl = owner.url ?: "" } catch (e: Exception) { }
+                latch.countDown()
+            }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            val host = try { Uri.parse(pageUrl).host } catch (e: Exception) { null }
             if (!isXHost(host)) {
                 engDeliver(owner, callbackId, JSONObject().put("ok", false).put("error", "not_x_page").toString())
                 return
