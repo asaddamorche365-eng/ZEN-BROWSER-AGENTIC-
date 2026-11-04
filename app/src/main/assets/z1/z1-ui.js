@@ -43,19 +43,37 @@
   var css = document.createElement('style');
   css.textContent = [
     '.zl-back{display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--border2);border-radius:20px;color:var(--text);font:700 11px Space Mono,monospace;letter-spacing:.5px;padding:7px 13px 7px 9px;margin:12px 0 0 14px}',
+    '.zl-nav{display:flex;align-items:center;gap:12px;margin:10px 14px 0;padding-bottom:10px;border-bottom:1px solid var(--border)}',
+    '.zl-nav .zl-back{margin:0}',
+    '.zl-pt{font:800 17px DM Sans,sans-serif;color:var(--accent3);letter-spacing:.3px}',
     '.zl-back svg{width:14px;height:14px;stroke:var(--accent3);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}',
-    '.zl-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}',
-    '.zl-st{background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:11px 12px;min-height:72px}',
-    '.zl-st .k{font:700 9px Space Mono,monospace;letter-spacing:1px;color:var(--muted)}',
-    '.zl-st .v{font:800 24px DM Sans,sans-serif;color:var(--text);margin-top:4px}',
-    '.zl-st .s{font:400 10px Space Mono,monospace;color:var(--muted);margin-top:2px}',
+    '.zl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:9px}',
+    '.zl-st{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:8px 10px;min-height:0}',
+    '.zl-st .k{font:700 8px Space Mono,monospace;letter-spacing:.8px;color:var(--muted)}',
+    '.zl-st .v{font:800 17px DM Sans,sans-serif;color:var(--text);margin-top:2px}',
+    '.zl-st .s{font:400 8.5px Space Mono,monospace;color:var(--muted);margin-top:1px}',
     '.zl-st.tap{cursor:pointer}',
     '.zl-st.on{border-color:rgba(16,185,129,.55)}',
     '.zl-st.on .v{color:#6ee7b7}',
-    '.zl-go{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;background:linear-gradient(135deg,var(--accent),#5b3fd8);border:0;border-radius:14px;color:#fff;font:800 15px DM Sans,sans-serif;padding:15px;margin-bottom:12px}',
-    '.zl-short{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}',
-    '.zl-sc{background:var(--s1);border:1px solid var(--border);border-radius:12px;color:var(--text);padding:11px 4px;font:700 10px Space Mono,monospace;letter-spacing:.5px;display:flex;flex-direction:column;align-items:center;gap:5px}',
-    '.zl-sc svg{width:20px;height:20px;stroke:var(--accent3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}',
+    '.zl-go{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;background:linear-gradient(135deg,var(--accent),#5b3fd8);border:0;border-radius:14px;color:#fff;font:800 13px DM Sans,sans-serif;padding:11px;margin-bottom:9px}',
+    '.zl-short{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:9px}',
+    '.zl-sc{background:var(--s1);border:1px solid var(--border);border-radius:11px;color:var(--text);padding:8px 2px;font:700 8.5px Space Mono,monospace;letter-spacing:.4px;display:flex;flex-direction:column;align-items:center;gap:3px}',
+    '.zl-sc svg{width:16px;height:16px;stroke:var(--accent3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}',
+    '#home-screen .zp-wrap{padding:10px 12px 70px}',
+    '#home-screen .zp-h{font-size:16px;margin:0}',
+    '#home-screen .zp-sub{font-size:9.5px;margin-bottom:8px}',
+    '#home-screen .zp-card{padding:9px 11px;margin-bottom:9px;border-radius:12px}',
+    '#home-screen .zp-lbl{font-size:8.5px;margin-bottom:5px}',
+    '.zl-files{margin-bottom:9px}',
+    '.zl-files .upload-box{margin:0 0 9px;padding:10px 12px;gap:10px;border-radius:12px}',
+    '.zl-files .upload-box-icon{font-size:20px}',
+    '.zl-files .upload-box-title{font-size:12px}',
+    '.zl-files .upload-box-sub{font-size:9.5px}',
+    '.zl-files .dash-header{padding:6px 2px 8px;border-bottom:0;background:transparent}',
+    '.zl-files .dash-title{font-size:10px}',
+    '.zl-files .dash-add-btn{padding:6px 12px!important;font-size:11px!important;border-radius:10px!important}',
+    '.zl-files .dash-list{padding-left:0;padding-right:0}',
+    '.zl-files .dash-empty{display:none}',
     '.zl-ev{padding:10px 0;border-bottom:1px solid var(--border)}',
     '.zl-ev:last-child{border-bottom:0}',
     '.zl-evh{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font:400 10px Space Mono,monospace;color:var(--muted)}',
@@ -101,13 +119,17 @@
   window.zlGoHome = goHome; window.zlGoHistory = goHistory; window.zlGoStats = goStats;
 
   // ---------- back pill: every sub screen gets a "< Home" button at the top (no bottom tab bar any more) ----------
-  var BACK_SCREENS = ['engine-screen', 'history-screen', 'zstats-screen', 'upload-screen', 'dashboard-screen'];
+  var BACK_SCREENS = ['engine-screen', 'history-screen', 'zstats-screen'];
+  var TITLES = { 'engine-screen': 'Engine', 'history-screen': 'History', 'zstats-screen': 'Stats' };
   function ensureBack(el) {
-    if (!el || el.querySelector('.zl-back')) return;
+    if (!el || el.querySelector('.zl-nav')) return;
+    var bar = document.createElement('div'); bar.className = 'zl-nav';
     var b = document.createElement('button'); b.className = 'zl-back'; b.type = 'button';
     b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg> Home';
     b.onclick = goHome;
-    el.insertBefore(b, el.firstChild);
+    var t = document.createElement('div'); t.className = 'zl-pt'; t.textContent = TITLES[el.id] || '';
+    bar.appendChild(b); bar.appendChild(t);
+    el.insertBefore(bar, el.firstChild);
   }
   function markTabs() {
     BACK_SCREENS.forEach(function (id) { var el = $(id); if (el) ensureBack(el); });
@@ -122,9 +144,10 @@
   // wrap showScreen: render the new screens on entry, keep the tab bar in sync
   var _ss = window.showScreen;
   window.showScreen = function (name) {
+    if (name === 'upload' || name === 'dashboard') { name = 'home'; arguments[0] = 'home'; }
     // deep-link z1/index.html#engine: boot routes to Home, send it to Engine once instead
     if (name === 'home' && /#engine/.test(location.hash) && !window.__zlHashDone && window.zlGo) { window.__zlHashDone = 1; window.zlGo('engine'); return; }
-    var r = _ss.apply(this, arguments);
+    var r = _ss.apply(this, [name]);
     try {
       if (name === 'home') renderHome();
       else if (name === 'history') renderHist();
@@ -137,36 +160,64 @@
 
   // ---------- HOME ----------
   function engStatus(c) { return { sea: !!c.sea, fed: !!c.fed }; }
+  // ---------- Home + Upload + file queue = one screen ----------
+  var FILE_NODES = [['drop-zone', 'upload-screen'], ['file-input', 'upload-screen'], ['dash-header', 'dashboard-screen', 1], ['coop-session-downloads', 'dashboard-screen'], ['dash-list', 'dashboard-screen']];
+  function fnode(n) { return n[2] ? document.querySelector('#dashboard-screen .dash-header, #hm-files .dash-header') : $(n[0]); }
+  function stashFiles() {   // move the upload / queue nodes back out before home is re-rendered (keeps their listeners)
+    FILE_NODES.forEach(function (n) { var el = fnode(n), host = $(n[1]); if (el && host && !host.contains(el)) host.appendChild(el); });
+  }
+  function hasQueue() { try { return typeof fileQueue !== 'undefined' && fileQueue.length > 0; } catch (e) { return false; } }
+  function mountFiles() {
+    var slot = $('hm-files'); if (!slot) return;
+    var q = hasQueue();
+    FILE_NODES.forEach(function (n) {
+      var el = fnode(n); if (!el) return;
+      if (n[0] === 'dash-header' || n[0] === 'coop-session-downloads' || n[0] === 'dash-list') { if (!q && n[0] !== 'coop-session-downloads') { el.style.display = 'none'; return; } if (n[0] === 'dash-header') el.style.display = 'flex'; if (n[0] === 'dash-list') el.style.display = ''; }
+      if (n[0] === 'drop-zone') el.style.display = q ? 'none' : '';
+      slot.appendChild(el);
+    });
+    try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
+  }
+  var qSig = '';
+  setInterval(function () {   // keep the queue live while Home is open
+    var h = $('home-screen'); if (!h || !h.classList.contains('active')) return;
+    var sig = ''; try { sig = fileQueue.map(function (f) { return f.id + ':' + (f.posts || []).length + ':' + (f.posts || []).filter(function (p) { return p.done; }).length; }).join('|'); } catch (e) {}
+    if (sig !== qSig) { var first = qSig === '' ; qSig = sig; if (!first || sig) { try { renderHome(); } catch (e) {} } }
+  }, 1500);
+
   function renderHome() {
     var el = $('home-screen'); if (!el) return;
     var c = cfgGet(), e = engStatus(c), k = keysState(), lg = xLogged();
     var user = ''; try { user = (jget('zl_profile', {}).xUsername) || (B && B.xUsername && B.xUsername()) || ''; } catch (x) {}
     var h = hist().filter(function (v) { return v.k === 'reply' || v.k === 'draft' || v.k === 'error' || v.k === 'off'; }).slice(0, 5);
     var rec = h.length ? h.map(evHtml).join('') : '<div class="zp-note" style="margin:0">No replies yet. Start in X, the engine logs every reply here.</div>';
+    stashFiles();
     el.innerHTML = '<div class="zp-wrap">' +
-      '<div class="zp-h">Z.1</div><div class="zp-sub">HOME' + (user ? ' · @' + esc(user) : '') + '</div>' +
+      '<div class="zp-h">Z.1 <span style="font:400 9.5px Space Mono,monospace;color:var(--muted)">HOME' + (user ? ' · @' + esc(user) : '') + '</span></div>' +
+      '<div style="height:8px"></div>' +
       '<button class="zl-go" id="hm-x">▶ Start in X</button>' +
-      '<div class="zl-st tap" id="hm-gen" style="min-height:0;margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="font-size:26px">📁</div><div><div class="k">UPLOAD POST LIST</div><div class="s" style="font-size:11px">add a .txt file · generate replies</div></div></div>' +
       '<div class="zl-grid">' +
       '<div class="zl-st tap' + (e.sea ? ' on' : '') + '" id="hm-sea"><div class="k">SEA · SEARCH</div><div class="v">' + (e.sea ? 'ON' : 'OFF') + '</div><div class="s">tap to switch</div></div>' +
       '<div class="zl-st tap' + (e.fed ? ' on' : '') + '" id="hm-fed"><div class="k">FED · HOME FEED</div><div class="v">' + (e.fed ? 'ON' : 'OFF') + '</div><div class="s">tap to switch</div></div>' +
       '<div class="zl-st on" id="hm-today"><div class="k">REPLIES TODAY</div><div class="v" id="hm-todayv">' + todayReplies() + '</div><div class="s">live</div></div>' +
       '<div class="zl-st' + (k.n ? ' on' : '') + '" id="hm-keys"><div class="k">API KEYS</div><div class="v">' + k.n + '/3</div><div class="s">' + (k.n ? [k.gem ? 'Gemini' : '', k.groq ? 'Groq' : '', k.oai ? 'OpenAI' : ''].filter(Boolean).join(' · ') : 'add in Profile') + '</div></div>' +
-      '<div class="zl-st' + (lg ? ' on' : '') + '" style="grid-column:1/3"><div class="k">X ACCOUNT</div><div class="v">' + (lg ? 'Logged in ✓' : 'Not logged in') + '</div><div class="s">' + (lg ? 'session found in the X tab' : 'open the X tab and log in first') + '</div></div>' +
+      '<div class="zl-st' + (lg ? ' on' : '') + '" style="grid-column:1/3;display:flex;align-items:center;justify-content:space-between"><div><div class="k">X ACCOUNT</div><div class="s" style="font-size:9px">' + (lg ? 'session found in the X tab' : 'open the X tab and log in first') + '</div></div><div class="v" style="font-size:13px;margin:0">' + (lg ? 'Logged in ✓' : 'Not logged in') + '</div></div>' +
       '</div>' +
       '<div class="zl-short">' +
       '<button class="zl-sc" id="hm-s-eng">' + IC.engine + 'ENGINE</button>' +
       '<button class="zl-sc" id="hm-s-his">' + IC.history + 'HISTORY</button>' +
       '<button class="zl-sc" id="hm-s-sta">' + IC.stats + 'STATS</button>' +
       '<button class="zl-sc" id="hm-s-pro">' + IC.profile + 'PROFILE</button></div>' +
+      '<div class="zp-lbl" style="margin:4px 2px 6px">// POST LIST</div>' +
+      '<div class="zl-files" id="hm-files"></div>' +
       '<div class="zp-card"><div class="zp-lbl">RECENT</div>' + rec + '</div>' +
       '</div>';
+    mountFiles();
     $('hm-x').onclick = function () { try { if (B && B.openX) B.openX(); else say('Open the X tab', 'error'); } catch (x) {} };
     $('hm-sea').onclick = function () { var n = !cfgGet().sea; cfgSet({ sea: n }); renderHome(); };
     $('hm-fed').onclick = function () { var n = !cfgGet().fed; cfgSet({ fed: n }); renderHome(); };
     $('hm-keys').onclick = goProfile;
     $('hm-s-eng').onclick = goEngine; $('hm-s-his').onclick = goHistory; $('hm-s-sta').onclick = goStats; $('hm-s-pro').onclick = goProfile;
-    $('hm-gen').onclick = goUpload;
   }
 
   // ---------- event row (History + Home recent) ----------
@@ -430,8 +481,6 @@
       pfFld('zl-pf-gem', 'Gemini API key', k.gem || '', 'password', 'AIza...') +
       pfFld('zl-pf-groq', 'Z1-G (Groq) API key', k.groq || '', 'password', 'gsk_...') +
       pfFld('zl-pf-oai', 'OpenAI API key', k.oai || '', 'password', 'sk-...') +
-      '<div class="field-label" style="margin:8px 0 5px">Z1-G custom prompt (optional)</div>' +
-      '<textarea class="field-input" id="zl-pf-z1g" rows="4" style="width:100%;resize:vertical;font-size:11px" placeholder="Personality / system prompt for Z1-G">' + esc(g.prompt || '') + '</textarea>' +
       '<div id="zl-pf-err" style="display:none;color:#f87171;font-size:12px;margin-top:8px"></div>' +
       '<button id="zl-pf-save" class="field-btn" style="width:100%;padding:11px;margin-top:10px">Save</button>' +
       '</div>';
@@ -441,7 +490,6 @@
       var pr = jget(PF_P, {}); if (u) { pr.xUsername = u; pr.manual = true; } jset(PF_P, pr);
       var kk = { gem: $('zl-pf-gem').value.trim(), groq: $('zl-pf-groq').value.trim(), oai: $('zl-pf-oai').value.trim() };
       jset(PF_K, kk); try { if (B && B.engKeysSet) B.engKeysSet(JSON.stringify(kk)); } catch (e) {}
-      jset(PF_G, { prompt: $('zl-pf-z1g').value });
       try { if (typeof zlApply === 'function') zlApply(); } catch (e) {}
       say('Saved'); pfBlock(); try { renderHome(); } catch (e) {}
     };
@@ -528,8 +576,89 @@
     if (s && s.id === 'home-screen') renderHome();
     // old menu "Stats" / "History" / "Dashboard" entries now open the new screens
     markTabs(); watchBack(); menuExtra();
+    try { var sl = $('session-label'), pu = jget('zl_profile', {}).xUsername; if (sl && pu && /^@?me$/i.test(sl.textContent.trim())) sl.textContent = '@' + pu; } catch (e) {}
     setInterval(function () { markTabs(); watchBack(); }, 1500);
   }
   window.zlHomeRender = renderHome;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 80); }); else setTimeout(boot, 80);
+})();
+
+/* ===== Settings sheet: old Z1 design for Tone / Grammar / Big Reply / Custom / Style, data = Engine cfg (same as the X engine) ===== */
+(function () {
+  var B = window.ZenX;
+  var TONES = ['Smart', 'Funny', 'Professional', 'Supportive', 'Witty', 'Curious', 'Short', 'Human', 'Alpha', 'Positive', 'PositiveQuestion', 'Helpful', 'Master', 'Custom', 'Auto'];
+  var LBL = { Professional: 'Pro', Supportive: 'Support', PositiveQuestion: 'Pos.Q', Auto: 'Auto Mix' };
+  var GRAM = TONES.filter(function (t) { return t !== 'Custom'; });
+  var BIGT = TONES.filter(function (t) { return t !== 'Custom' && t !== 'Auto'; });
+  var cfg = {}, gramOpen = false;
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function load() {
+    var c = {}; try { c = JSON.parse((B && B.engCfgGet && B.engCfgGet()) || '{}') || {}; } catch (e) {}
+    cfg = {
+      tone: TONES.indexOf(c.tone) >= 0 ? c.tone : 'Smart', style: c.style || '',
+      grammar: (c.grammar && typeof c.grammar === 'object') ? c.grammar : {},
+      bigOn: !!c.bigOn, bigWords: c.bigWords || '', bigTone: BIGT.indexOf(c.bigTone) >= 0 ? c.bigTone : 'Smart',
+      customTone: c.customTone || '', customWords: c.customWords || ''
+    };
+  }
+  function save(p) {
+    for (var k in p) cfg[k] = p[k];
+    try { B.engCfgSet(JSON.stringify(p)); } catch (e) { try { toast('Run Z1 inside ZEN browser', 'error'); } catch (x) {} }
+  }
+  var INP = 'width:100%;margin-top:6px;background:var(--s2);border:1.5px solid var(--border2);border-radius:12px;padding:10px 12px;color:var(--text);font-size:13px;font-family:inherit;box-sizing:border-box;outline:none;';
+  function tog(id, on) { return '<label class="toggle-switch"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '><span class="toggle-slider"></span></label>'; }
+  function render() {
+    var el = $('zl-set-engine'); if (!el) return;
+    load();
+    var chips = TONES.map(function (t) { return '<div class="tone-chip' + (cfg.tone === t ? ' active' : '') + '" data-tone="' + t + '">' + (LBL[t] && t !== 'Auto' ? LBL[t] : t === 'Auto' ? 'Auto Mix' : t) + '</div>'; }).join('');
+    var gr = GRAM.map(function (t) {
+      return '<div class="toggle-row"><div><div class="toggle-label">' + (t === 'Auto' ? 'Auto Mix' : t) + '</div></div>' + tog('zs-g-' + t, cfg.grammar[t] !== false) + '</div>';
+    }).join('');
+    var bt = BIGT.map(function (t) { return '<option value="' + t + '"' + (cfg.bigTone === t ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+    el.innerHTML =
+      '<div class="setting-block"><span class="field-label">// TONE</span><div class="tone-grid" id="zs-tones">' + chips + '</div>' +
+      '<div style="font-size:10px;color:#facc15;margin-top:6px;line-height:1.5;">Auto Mix = random tone every reply, never the same one twice in a row.</div>' +
+      '<div id="zs-custom" style="display:' + (cfg.tone === 'Custom' ? 'block' : 'none') + ';margin-top:10px;"><span class="field-label">// CUSTOM TONE — YOUR INSTRUCTIONS</span>' +
+      '<textarea id="zs-cprompt" rows="4" placeholder="e.g. Reply like a sarcastic crypto trader. Max one sentence." style="' + INP + 'resize:vertical;">' + esc(cfg.customTone) + '</textarea>' +
+      '<input id="zs-cwords" type="number" min="1" max="60" placeholder="Words (optional)" value="' + esc(cfg.customWords) + '" style="' + INP + '"></div></div>' +
+
+      '<div class="setting-block"><div class="toggle-row" id="zs-gfold" style="cursor:pointer"><div><div class="toggle-label">// USE GRAMMAR</div>' +
+      '<div style="font-size:10px;color:#facc15;margin-top:3px;line-height:1.5;">Turn a tone OFF to let the AI write naturally without fixing grammar.</div></div><span id="zs-garrow" style="color:var(--muted)">' + (gramOpen ? '▲' : '▼') + '</span></div>' +
+      '<div id="zs-glist" style="display:' + (gramOpen ? 'block' : 'none') + '">' + gr + '</div></div>' +
+
+      '<div class="setting-block"><span class="field-label">// BIG REPLY</span>' +
+      '<div style="font-size:10px;color:#facc15;margin-bottom:4px;line-height:1.5;">Replies are short by default. Turn this on for your own word count and tone.</div>' +
+      '<div class="toggle-row"><div><div class="toggle-label">Big Reply Mode</div></div>' + tog('zs-bigon', cfg.bigOn) + '</div>' +
+      '<input id="zs-bwords" placeholder="Word count, e.g. 50-80 or 100" value="' + esc(cfg.bigWords) + '" style="' + INP + '">' +
+      '<select id="zs-btone" style="' + INP + '">' + bt + '</select>' +
+      '<div class="tone-chip" id="zs-breset" style="margin-top:8px;">↺ Reset to default</div></div>' +
+
+      '<div class="setting-block"><span class="field-label">// REPLY STYLE (YOUR VOICE)</span>' +
+      '<textarea id="zs-style" rows="3" placeholder="Describe yourself like you would describe a friend." style="' + INP + 'resize:vertical;">' + esc(cfg.style) + '</textarea></div>';
+    wire(el);
+  }
+  function wire(el) {
+    [].forEach.call(el.querySelectorAll('[data-tone]'), function (b) {
+      b.onclick = function () { save({ tone: b.getAttribute('data-tone') }); render(); };
+    });
+    el.querySelector('#zs-gfold').onclick = function () { gramOpen = !gramOpen; $('zs-glist').style.display = gramOpen ? 'block' : 'none'; $('zs-garrow').textContent = gramOpen ? '▲' : '▼'; };
+    GRAM.forEach(function (t) {
+      var e = el.querySelector('#zs-g-' + t);
+      if (e) e.onchange = function () { var g = {}; for (var k in cfg.grammar) g[k] = cfg.grammar[k]; g[t] = e.checked; save({ grammar: g }); };
+    });
+    el.querySelector('#zs-bigon').onchange = function () { save({ bigOn: this.checked }); };
+    el.querySelector('#zs-bwords').onchange = function () { save({ bigWords: this.value.trim() }); };
+    el.querySelector('#zs-btone').onchange = function () { save({ bigTone: this.value }); };
+    el.querySelector('#zs-breset').onclick = function () { save({ bigOn: false, bigWords: '', bigTone: 'Smart' }); render(); try { toast('Big Reply reset', 'success'); } catch (e) {} };
+    el.querySelector('#zs-cprompt').onchange = function () { save({ customTone: this.value.trim() }); };
+    el.querySelector('#zs-cwords').onchange = function () { save({ customWords: this.value.trim() }); };
+    el.querySelector('#zs-style').onchange = function () { save({ style: this.value.trim() }); };
+  }
+  function init() {
+    var sh = $('settings-sheet'); if (!sh) return;
+    new MutationObserver(function () { if (sh.classList.contains('open')) render(); }).observe(sh, { attributes: true, attributeFilter: ['class'] });
+    render();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 100); }); else setTimeout(init, 100);
 })();
