@@ -966,6 +966,12 @@ class MainActivity : Activity() {
             runOnUiThread { openUrl(X_URL, true) }
         }
 
+        // open an x.com / twitter.com URL (e.g. the SEA search page) in the X tab: reuse the tab if there is one, else a new tab
+        @JavascriptInterface
+        fun openXUrl(url: String) {
+            runOnUiThread { openXUrlUi(url) }
+        }
+
         @JavascriptInterface
         fun fetchUsername(force: Boolean, callbackId: String) {
             runOnUiThread { startUserFetch(force) { json -> deliver(owner, callbackId, json) } }
@@ -997,12 +1003,31 @@ class MainActivity : Activity() {
     //  Result: window.__zenEngCb(callbackId, jsonString)  ->  {ok:true,text} | {ok:false,error}
     // =====================================================================
 
+    private fun isXHost(h: String?): Boolean = h == "x.com" || h == "www.x.com" || h == "twitter.com" || h == "mobile.twitter.com"
+
+    private fun openXUrlUi(url: String) {
+        if (!isXHost(Uri.parse(url).host)) return
+        var idx = -1
+        for (i in tabs.indices) {
+            val t = tabs[i]
+            if (!t.isHome && !t.isZ1 && isXHost(Uri.parse(t.web.url ?: "").host)) { idx = i; break }
+        }
+        if (idx >= 0) {
+            switchTo(idx)
+            tabs[idx].web.loadUrl(url)
+        } else newTab(false, url)
+    }
+
     private fun engPrefs() = getSharedPreferences("zen_eng", Context.MODE_PRIVATE)
 
     private val engCfgKeys = arrayOf("sea", "fed", "auto", "like", "likePct", "target", "targetKw", "tone", "style",
         "keyword", "maxRun", "paceMin", "paceMax", "ageOn", "ageMinMin", "ageMaxMin", "myHandle",
         "grammar", "bigOn", "bigWords", "bigTone", "customTone", "customWords",
-        "tUi", "tMode", "tPer", "tBreakEvery", "tBreakMin", "tBreakMax")
+        "tUi", "tMode", "tPer", "tBreakEvery", "tBreakMin", "tBreakMax",
+        "tMethod", "tN", "tTotal", "cSpeed", "cGap", "ldMin", "ldMax",
+        "seaLike", "seaLikePct", "seaMax", "seaKeyword", "fedLike", "fedLikePct", "fedMax", "fedKeyword",
+        "seaKw", "seaQs", "seaQActive", "seaRes", "seaUrl",
+        "seaEs2", "seaEs2Pct", "fedEs2", "fedEs2Pct")
 
     private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
 
