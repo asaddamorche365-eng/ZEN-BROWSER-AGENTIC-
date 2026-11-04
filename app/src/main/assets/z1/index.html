@@ -6759,7 +6759,13 @@ function renderDashboard(){
     renderTGInbox();
     return;
   }
-  fileQueue.forEach(f=>{
+  _renderFileCards(list, fileQueue);
+  renderTGInbox();
+}
+
+// Shared file-card renderer: the All Files tab passes the whole queue, Home passes only the latest file.
+function _renderFileCards(list, files){
+  files.forEach(f=>{
     const total = (f.posts||[]).length;
     const done  = (f.posts||[]).filter(p=>p.done).length;
     const pend  = total - done;
@@ -6811,7 +6817,6 @@ function renderDashboard(){
     });
     list.appendChild(card);
   });
-  renderTGInbox();
 }
 
 function openFileFromQueue(fileId){
@@ -7106,6 +7111,7 @@ function _deleteFileFromQueue(fileId){
   saveQueue();
   toast(`"${f.name}" deleted`,'success');
   renderDashboard();
+  try{ if(typeof currentScreen!=='undefined' && currentScreen==='home' && window.zlHomeRender) window.zlHomeRender(); }catch(e){}
 }
 
 // ── SAVE ─────────────────────────────────────────────────────
@@ -10520,7 +10526,8 @@ _applyHeaderBgConfig({});
 // ══════════════════════════════════════════════════════════
 (function initNavHighlight() {
   const navMap = {
-    'home-btn':        ['home-screen','upload-screen','dashboard-screen','main-screen'],
+    'home-btn':        ['home-screen','upload-screen','main-screen'],
+    'mmenu-upload':    ['dashboard-screen'],
     'zstats-btn':      ['zstats-screen'],
     'mmenu-engine':    ['engine-screen'],
     'discover-btn':    ['discover-screen'],
