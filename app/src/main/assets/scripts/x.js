@@ -12,7 +12,15 @@
     tone: 'Smart', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
     ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '',
     grammar: {}, bigOn: false, bigWords: '', bigTone: 'Smart', customTone: '', customWords: '',
-    tUi: 'classic', tMode: 'fast', tPer: 40, tBreakEvery: 50, tBreakMin: 30, tBreakMax: 50 };
+    // timing (Engine -> Timing): CLASSIC = Reply Speed + like->comment delay, ADVANCED = FLASH / FLASH LITE / FAST / SLOW / CUSTOM (same as the extension's Timing Hub)
+    tUi: 'classic', tMode: 'fast', tMethod: 'per', tPer: 40, tN: 50, tTotal: 1200, tBreakEvery: 50, tBreakMin: 30, tBreakMax: 50,
+    cSpeed: 'normal', cGap: 5, ldMin: 0, ldMax: 0,
+    // per-engine settings (null = fall back to the old shared key above)
+    seaLike: null, seaLikePct: null, seaMax: null, seaKeyword: null, fedLike: null, fedLikePct: null, fedMax: null, fedKeyword: null,
+    // SEA search: the Engine screen builds the final search URL (keywords + filters, or the ON custom query) into seaUrl
+    seaUrl: '',
+    // Extra Safety 2 (open the post first), separate for each engine
+    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30 };
   // settings + runtime toggles live in the app (SharedPreferences) so the Engine settings page and this panel share them
   function loadCfg() {
     var c = {};
@@ -23,6 +31,11 @@
   function patchCfg(p) {
     for (var k in p) cfg[k] = p[k];
     try { if (window.ZenEng && window.ZenEng.setCfg) window.ZenEng.setCfg(JSON.stringify(p)); else localStorage.setItem(CK, JSON.stringify(cfg)); } catch (e) {}
+  }
+  var SHARED = { Like: 'like', LikePct: 'likePct', Max: 'maxRun', Keyword: 'keyword' };
+  function ecfg(eng, k) {   // per-engine value (seaLike / fedMax ...) with fallback to the old shared key
+    var v = cfg[String(eng || '').toLowerCase() + k];
+    return (v === undefined || v === null) ? cfg[SHARED[k]] : v;
   }
   var replied = {}; try { replied = JSON.parse(localStorage.getItem(RK) || '{}') || {}; } catch (e) {}
   function markReplied(id, eng) {
@@ -269,13 +282,14 @@
     var t0 = Date.now(), b = null;
     while (Date.now() - t0 < 7500) { b = submitBtn(ed); if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') break; b = null; await sleep(100); }
     if (!b) return false;
-    await sleep(rnd(2000, 3000));
+    await sleep(fx(rnd(2000, 3000), 400));
     try { b.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
     await tap(b);
     var t1 = Date.now();
     while (Date.now() - t1 < 6000) {
       await sleep(150);
       if (!ed.isConnected && !document.querySelector('[data-testid="tweetTextarea_0"]')) return true;
+      if (ed.isConnected && Date.now() - t1 > 1500 && editorEmpty(ed)) return true;   // inline composer on a post page: it stays, but its text is gone
       var tt = document.querySelector('[data-testid="toast"]'); if (tt && /something went wrong/i.test(tt.textContent || '')) throw new Error('X: something went wrong');
     }
     return !ed.isConnected;
@@ -326,7 +340,7 @@
     if (cfg.bigOn && TONES[cfg.bigTone]) t = cfg.bigTone;       // Big Reply mode: its own tone wins (like the extension)
     return t;
   }
-  function buildPrompt(post, tone) {
+  function buildPrompt(post, tone, eng) {
     var big = !!cfg.bigOn && String(cfg.bigWords || '').trim();
     var p = 'Post:\n' + post + '\n\n';
     if (tone === 'Custom' && String(cfg.customTone || '').trim()) p += 'Reply instructions: ' + cfg.customTone.trim() + ' ';
@@ -338,31 +352,77 @@
     var useGrammar = !(cfg.grammar && cfg.grammar[tone] === false);
     p += useGrammar ? ' Use correct grammar and punctuation.' : ' Write naturally like real typing: relaxed punctuation, grammar fixing is OFF.';
     if (cfg.style && cfg.style.trim()) p += ' Use this replying style (your voice): ' + cfg.style.trim();
-    if (cfg.keyword && cfg.keyword.trim()) p += ' Include this keyword naturally: ' + cfg.keyword.trim();
+    var kw = String(ecfg(eng, 'Keyword') || '').trim(); if (kw) p += ' Include this keyword naturally: ' + kw;
     return p;
   }
-  function gen(post, tone) {
+  function gen(post, tone, eng) {
     return new Promise(function (resolve, reject) {
       if (!window.ZenEng) { reject(new Error('Bridge missing (update app)')); return; }
       var id = 'g' + (++cbN), done = false;
       var to = setTimeout(function () { if (!done) { done = true; delete cbs[id]; reject(new Error('AI timeout')); } }, 45000);
       cbs[id] = function (r) { if (done) return; done = true; clearTimeout(to); if (r && r.ok && r.text) resolve(r.text); else reject(new Error((r && r.error) || 'AI failed')); };
-      try { window.ZenEng.gen(buildPrompt(post, tone), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
+      try { window.ZenEng.gen(buildPrompt(post, tone, eng), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
     });
   }
-  // ---- timing (CLASSIC = old pause min/max, ADVANCED = FAST / SLOW / CUSTOM like the extension's Timing Hub) ----
-  var T_FAST = { steps: [1, 2], next: [5, 7], every: 50, len: [30, 50] };
-  var T_SLOW = { steps: [3, 5], next: [12, 18], every: 25, len: [75, 125] };
-  function timing() {
-    if (cfg.tUi !== 'advanced') return { steps: null, next: [cfg.paceMin, Math.max(cfg.paceMin, cfg.paceMax)], every: 0, len: [0, 0] };
-    if (cfg.tMode === 'slow') return T_SLOW;
-    if (cfg.tMode !== 'custom') return T_FAST;
-    var T = Math.max(5, Number(cfg.tPer) || 40), s = Math.min(20, Math.max(1, T * 0.06));
-    var b1 = Number(cfg.tBreakMin) || 0, b2 = Number(cfg.tBreakMax) || 0;
-    return { steps: [Math.round(s * 7) / 10, Math.round(s * 13) / 10], next: [Math.max(2, Math.round(T * 0.5)), Math.max(2, Math.round(T))],
-      every: Math.max(0, Math.floor(Number(cfg.tBreakEvery) || 0)), len: [Math.min(b1, b2), Math.max(b1, b2)] };
+  // ---- timing: copy of the extension's Timing Hub (comment group) ----
+  // CLASSIC  = Reply Speed (Normal 4-7 s / Fast 2-3.5 s / Custom gap) + "comment after like" delay.
+  // ADVANCED = FLASH / FLASH LITE / FAST / SLOW / CUSTOM (per post or total time). Numbers are in seconds.
+  var T_FAST = { view: [1, 2], like: [1, 2], gen: [1, 2], post: [1, 2], next: [5, 7], target: null, breakEvery: 50, breakLen: [30, 50] };
+  var T_SLOW = { view: [3, 5], like: [3, 5], gen: [3, 5], post: [3, 5], next: [12, 18], target: null, breakEvery: 25, breakLen: [75, 125] };
+  var T_FLASH = { view: [0.1, 0.3], like: [0.1, 0.3], gen: [0.1, 0.3], post: [0.1, 0.3], next: [0.3, 0.8], target: null, breakEvery: 0, breakLen: [0, 0], flash: true };
+  var T_LITE = { view: [0.3, 0.8], like: [0.3, 0.8], gen: [0.2, 0.6], post: [0.2, 0.6], next: [0.8, 1.6], target: 12.5, breakEvery: 0, breakLen: [0, 0], flash: true, lite: true };
+  function clampN(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  function r1(v) { return Math.round(v * 10) / 10; }
+  function advRes() {   // null in CLASSIC
+    if (cfg.tUi !== 'advanced') return null;
+    var m = cfg.tMode;
+    if (m === 'flash') return T_FLASH;
+    if (m === 'flashlite') return T_LITE;
+    if (m === 'slow') return T_SLOW;
+    if (m !== 'custom') return T_FAST;
+    var T = cfg.tMethod === 'total' ? Math.max(1, (Number(cfg.tTotal) || 1200) / Math.max(1, Number(cfg.tN) || 50)) : Math.max(1, Number(cfg.tPer) || 40);
+    var s = clampN(T * 0.06, 1, 20), st = [r1(s * 0.7), r1(s * 1.3)], b1 = Number(cfg.tBreakMin) || 0, b2 = Number(cfg.tBreakMax) || 0;
+    return { view: st, like: st, gen: st, post: st, next: [Math.max(2, Math.round(T * 0.5)), Math.max(2, Math.round(T))], target: T,
+      breakEvery: Math.max(0, Math.floor(Number(cfg.tBreakEvery) || 0)), breakLen: [Math.min(b1, b2), Math.max(b1, b2)] };
   }
-  async function stepWait() { var t = timing(); if (t.steps) await sleep(rnd(t.steps[0], t.steps[1]) * 1000); }
+  function rrange(r) { var a = Number(r && r[0]) || 0, b = Number(r && r[1]) || 0; return Math.min(a, b) + Math.random() * Math.abs(b - a); }
+  function fx(ms, min) {   // Flash shrinks fixed internal waits (Lite keeps 40%, Flash 20%)
+    var r = advRes(); if (!r) return ms;
+    return r.lite ? Math.max(min || 0, Math.round(ms * 0.4)) : (r.flash ? Math.max(min || 0, Math.round(ms * 0.2)) : ms);
+  }
+  async function likeWait() {   // after a like lands, before the reply box opens
+    var r = advRes();
+    if (r) { var ms = Math.round(rrange(r.like) * 1000); if (ms > 0) { setStat('Like -> comment ' + r1(ms / 1000) + 's'); await sleep(ms); } return; }
+    var a = Number(cfg.ldMin) || 0, b = Number(cfg.ldMax) || 0;
+    if (b > 0 || a > 0) await sleep(rrange([a, b]) * 1000); else await sleep(rnd(700, 1600));
+  }
+  async function genWait() { var r = advRes(); if (!r) return; var ms = Math.round(rrange(r.gen) * 1000); if (ms > 0) { setStat('After reply is generated ' + r1(ms / 1000) + 's'); await sleep(ms); } }
+  var cycleT0 = 0;   // start of the current post's cycle (custom mode fills the rest of the target time)
+  function classicNext() {
+    var ms;
+    if (cfg.cSpeed === 'fast') ms = 2000 + Math.random() * 1500;
+    else if (cfg.cSpeed === 'custom') ms = Math.max(1, Number(cfg.cGap) || 5) * 1000;
+    else ms = 4000 + Math.random() * 3000;
+    return ms * (0.8 + Math.random() * 0.4);   // +-20% jitter, fixed intervals are detectable
+  }
+  async function countdown(ms, label) {
+    var end = Date.now() + ms;
+    while (cfg.auto) { var left = end - Date.now(); if (left <= 0) break; setStat(label + ' ' + Math.ceil(left / 1000) + 's'); await sleep(Math.min(left, 1000)); }
+  }
+  // everything after a reply lands: "after clicking Reply" wait, optional break, then the gap before the next post
+  async function paceWait() {
+    var r = advRes();
+    if (!r) { await countdown(classicNext(), 'Waiting'); return; }
+    var pm = Math.round(rrange(r.post) * 1000); if (pm > 0) await countdown(pm, 'After reply');
+    if (r.breakEvery > 0 && runCount > 0 && runCount % r.breakEvery === 0 && r.breakLen[1] > 0) {
+      await countdown(Math.round(rrange(r.breakLen)) * 1000, 'Break'); return;
+    }
+    var gap, elapsed = cycleT0 ? Date.now() - cycleT0 : 0;
+    if (r.target && r.lite) gap = clampN(elapsed * 0.17 * (0.85 + Math.random() * 0.3), 300, 3000);
+    else if (r.target) gap = Math.max(r.flash ? 300 : 2000, r.target * 1000 * (0.85 + Math.random() * 0.3) - elapsed);
+    else gap = rrange(r.next) * 1000;
+    await countdown(gap, 'Next post in');
+  }
   // ---- history log (stored in the app, shown in Z1 → History / Stats) ----
   function logEv(o) { try { if (window.ZenEng && window.ZenEng.logEvent) { o.t = Date.now(); window.ZenEng.logEvent(JSON.stringify(o)); } } catch (e) {} }
   function cleanReply(t) {
@@ -370,6 +430,92 @@
     if (!t || /https?:\/\/|www\./i.test(t)) return '';
     return t.slice(0, 270);
   }
+
+  // ---------------- Extra Safety 2 (port of the extension's zexEs2*) ----------------
+  // AUTO only, separate switch + % for SEA and FED. Draw by % (a shuffled deck, so the real share stays close to the %):
+  // "open" = tap the post's own permalink (time link), do the whole reply from the post page, then go back to the list.
+  var es2Back = null, es2Iv = null;
+  function statusPageId() { var m = location.pathname.match(/\/status\/(\d+)/); return m ? m[1] : ''; }
+  function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+  function es2On(eng) { return !!cfg[String(eng).toLowerCase() + 'Es2']; }
+  function es2Pct(eng) { var v = Number(cfg[String(eng).toLowerCase() + 'Es2Pct']); return isFinite(v) ? v : 30; }
+  function es2Roll(eng) {
+    var c = Math.min(100, Math.max(0, Math.round(es2Pct(eng)) || 0));
+    if (c >= 100) return true; if (c <= 0) return false;
+    var g = gcd(c, 100), size = 100 / g, yes = c / g, k = Math.max(1, Math.ceil(20 / size)); size *= k; yes *= k;
+    var sk = 'zenEs2Deck:' + eng + ':' + c, deck = [];
+    try { deck = JSON.parse(sessionStorage.getItem(sk) || '[]'); } catch (e) {}
+    if (!Array.isArray(deck) || !deck.length) {
+      deck = []; for (var n = 0; n < size; n++) deck.push(n < yes ? 1 : 0);
+      for (var i = deck.length - 1; i > 0; i--) { var r = Math.floor(Math.random() * (i + 1)), t = deck[i]; deck[i] = deck[r]; deck[r] = t; }
+    }
+    var v = deck.pop() === 1;
+    try { sessionStorage.setItem(sk, JSON.stringify(deck)); } catch (e) {}
+    return v;
+  }
+  async function waitFor(fn, ms) {
+    var end = Date.now() + ms;
+    while (Date.now() < end) { try { var v = fn(); if (v) return v; } catch (e) {} await sleep(300); }
+    return null;
+  }
+  function es2Abort() { es2Back = null; }
+  function postPageReplyOff() {   // "only people ... can reply" banner on the post page
+    try {
+      var col = document.querySelector('[data-testid="primaryColumn"]') || document.body, t = (col.innerText || '');
+      return /(only\s[^\n]{0,90}can reply|people\s[^\n]{0,90}can reply)/i.test(t) && !/everyone can reply/i.test(t);
+    } catch (e) { return false; }
+  }
+  // -> { art } post page article | { off:true } comments limited | null (do it the normal way from the list)
+  async function es2Enter(a, eng) {
+    if (!es2Roll(eng)) return null;
+    var sid = statusId(a), listUrl = location.href; if (!sid) return null;
+    var exact = new RegExp('/status/' + sid + '$');
+    var links = $$('a[href*="/status/' + sid + '"]', a).filter(function (x) { return exact.test((x.getAttribute('href') || '').split('?')[0]); });
+    var link = links.filter(function (x) { return x.querySelector('time'); })[0] || links[0];
+    if (!link) return null;
+    es2Back = { url: listUrl, sid: sid, ts: Date.now(), ts2: 0 }; es2Watch();
+    setStat('Opening the post first');
+    try { await moveCursor(link); link.click(); } catch (e) { es2Abort(); return null; }
+    var landed = await waitFor(function () { return statusPageId() !== '' && !/\/compose\//.test(location.pathname); }, 6000);
+    if (!landed) { es2Abort(); return null; }
+    if (statusPageId() !== sid) {   // wrong post opened: step back out, reply the normal way
+      es2Abort(); history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); await sleep(800); return null;
+    }
+    var art = await waitFor(function () {
+      var x = articles().filter(function (y) { return statusId(y) === sid; })[0];
+      return x && x.querySelector('[data-testid="reply"]') ? x : null;
+    }, 8000);
+    if (!art) { es2Abort(); history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); await sleep(800); return null; }
+    await sleep(fx(rnd(1500, 3500), 300));
+    if (postPageReplyOff()) return { off: true };
+    return { art: art };
+  }
+  // reply flow is over (posted / failed / discarded): leave the post page and wait until the list is back
+  async function es2Return() {
+    var b = es2Back; if (!b) return;
+    try {
+      var t0 = Date.now();
+      while (/\/compose\//.test(location.pathname) && Date.now() - t0 < 8000) await sleep(250);
+      await sleep(fx(rnd(1200, 2200), 300));
+      if (statusPageId()) {
+        history.back();
+        await waitFor(function () { return statusPageId() === '' && !/\/compose\//.test(location.pathname); }, 8000);
+        if (statusPageId()) { location.href = b.url; await sleep(1500); }   // last resort: reload the list page
+      }
+      await waitFor(function () { return document.querySelector('article'); }, 8000);
+      await sleep(fx(rnd(700, 1400), 200));
+    } catch (e) {} finally { es2Back = null; }
+  }
+  function es2WatchTick() {   // safety net: a post page with no reply flow for 40 s -> leave it
+    try {
+      var b = es2Back;
+      if (!b) { clearInterval(es2Iv); es2Iv = null; return; }
+      if (Date.now() - b.ts > 240000) { es2Back = null; return; }
+      if (/\/compose\//.test(location.pathname)) { b.ts2 = Date.now(); return; }
+      if (statusPageId() && Date.now() - (b.ts2 || b.ts) > 40000) { es2Back = null; history.back(); }
+    } catch (e) {}
+  }
+  function es2Watch() { if (!es2Iv) es2Iv = setInterval(es2WatchTick, 2000); }
 
   // ---------------- per-post flow ----------------
   var busy = new WeakSet(), done = new WeakSet(), autoSkip = new WeakSet(), lastEditor = null;
@@ -388,19 +534,35 @@
     var usedTone = '';
     try {
       setStat('Opening reply');
-      if (cfg.like && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < cfg.likePct) {
-        var lk = a.querySelector('[data-testid="like"]'); if (lk) { await tap(lk); await sleep(rnd(700, 1600)); }
+      if (ecfg(eng, 'Like') && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < Number(ecfg(eng, 'LikePct'))) {
+        var lk = a.querySelector('[data-testid="like"]'); if (lk) { await tap(lk); await likeWait(); }
       }
-      var ed = await openReplyBox(a); if (!ed) throw new Error('Reply box did not open');
+      // Extra Safety 2 (AUTO only): sometimes open the post itself first and reply from its page
+      var ar = a;
+      if (cfg.auto && es2On(eng) && !statusPageId()) {
+        try {
+          var r2 = await es2Enter(a, eng);
+          if (r2 && r2.off) { var e2 = new Error('comments off'); e2.off = true; throw e2; }
+          if (r2 && r2.art) ar = r2.art;
+          else if (!a.isConnected) {   // we stepped back out: the feed re-rendered, find this post again
+            var re = await waitFor(function () { return articles().filter(function (y) { return statusId(y) === sid; })[0]; }, 5000);
+            if (re) ar = re;
+          }
+        } catch (e3) {
+          if (e3 && e3.off) throw e3;
+          es2Abort(); if (statusPageId()) { history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); }
+        }
+      }
+      var ed = await openReplyBox(ar); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
-      await stepWait();
       setStat('Generating reply');
       usedTone = pickTone();
-      var reply = cleanReply(await gen(post, usedTone)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
+      var reply = cleanReply(await gen(post, usedTone, eng)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
+      await genWait();
       if (!(await insertText(ed, reply))) throw new Error('Text did not land in the box');
       ourTexts[normT(reply)] = 1;
       var posted = false;
-      if (cfg.auto) { setStat('Posting'); await stepWait(); posted = await postReply(liveEditor() || ed); }
+      if (cfg.auto) { setStat('Posting'); posted = await postReply(liveEditor() || ed); }
       btn.textContent = 'DONE'; btn.classList.add('zen-done'); btn.style.opacity = '.6';
       if (posted) { markReplied(sid, eng); stat.done++; }
       logEv({ k: posted ? 'reply' : 'draft', e: eng, id: sid, a: author(a) || '', p: post.slice(0, 160), r: reply, tone: usedTone });
@@ -410,7 +572,7 @@
       if (err && err.off) { skipped[sid] = 1; markReplied(sid, 'off'); btn.remove(); await closeComposer(); logEv({ k: 'off', e: eng, id: sid, a: author(a) || '' }); toast('Comments off — skipped', 'warn'); }
       else { logEv({ k: 'error', e: eng, id: sid, a: author(a) || '', m: String((err && err.message) || 'Reply failed').slice(0, 120), tone: usedTone }); btn.innerHTML = html; btn.disabled = false; toast(String((err && err.message) || 'Reply failed'), 'error'); await closeComposer(); }
       return false;
-    } finally { busy.delete(a); }
+    } finally { busy.delete(a); if (es2Back) await es2Return(); }
   }
 
   function injectButton(a, eng) {
@@ -462,7 +624,7 @@
     setStat('Running');
     var none = 0, cls = tag[eng], reloading = false, stopMsg = '';
     try {
-      while (cfg.auto && curMode() === eng && runCount < cfg.maxRun) {
+      while (cfg.auto && curMode() === eng && runCount < ecfg(eng, 'Max')) {
         var target = articles().filter(function (a) { var b = a.querySelector('.' + cls); return b && !b.disabled && !autoSkip.has(a) && !busy.has(a); })[0];
         if (!target) {
           none++;
@@ -480,19 +642,15 @@
         none = 0;
         var btn = target.querySelector('.' + cls);
         await ensureVisible(target);
+        cycleT0 = Date.now();
         var ok = await handleClick(target, btn, eng);
         runCount++;
         if (ok) { emptyReloads = 0; writeRun({ empty: 0 }); }
         if (!ok && !btn.classList.contains('zen-done')) { autoSkip.add(target); var s2 = statusId(target); if (s2) skipped[s2] = 1; await closeComposer(); await sleep(1200); continue; }
         await waitClose(lastEditor);
-        var tm = timing();
-        var pw = rnd(tm.next[0], Math.max(tm.next[0], tm.next[1])); setStat('Waiting ' + Math.round(pw) + 's'); await sleep(pw * 1000);
-        if (tm.every > 0 && runCount > 0 && runCount % tm.every === 0 && tm.len[1] > 0) {
-          var bl = Math.round(rnd(tm.len[0], Math.max(tm.len[0], tm.len[1])));
-          for (var bq = bl; bq > 0 && cfg.auto; bq--) { setStat('Break ' + bq + 's'); await sleep(1000); }
-        }
+        await paceWait();
       }
-      if (!stopMsg && runCount >= cfg.maxRun && cfg.auto) stopMsg = 'Max per run reached';
+      if (!stopMsg && runCount >= ecfg(eng, 'Max') && cfg.auto) stopMsg = 'Max per run reached';
     } catch (e) { toast(String(e && e.message || e), 'error'); }
     finally {
       autoRunning = false;
@@ -500,7 +658,7 @@
         logEv({ k: 'run', e: eng, done: stat.done, skip: stat.skip, m: stopMsg || '' });
         setStat(cfg.auto ? 'Stopped' : 'Idle');
         if (stopMsg) { toast(stopMsg + ' - auto stopped', 'success'); setStat(stopMsg); }
-        if (cfg.auto && (stopMsg || runCount >= cfg.maxRun)) patchCfg({ auto: false });
+        if (cfg.auto && (stopMsg || runCount >= ecfg(eng, 'Max'))) patchCfg({ auto: false });
         if (!cfg.auto) clearRun();
       }
     }
@@ -514,6 +672,7 @@
   }
   function scan() {
     cfg = loadCfg();
+    if (es2Back && Date.now() - es2Back.ts < 240000) return;   // Extra Safety 2 detour: do not touch the page
     var m = curMode();
     if (m !== lastMode) { teardown(); lastMode = m; if (m) toast(m + ' engine ON — buttons appear on posts', 'success'); }
     if (!m) return;
@@ -535,7 +694,9 @@
       '<div style="display:flex;gap:8px;margin-bottom:8px">' + chip('sea', 'SEA') + chip('fed', 'FED') + '</div>' +
       '<div style="font-size:12px;color:#c4b5fd;margin-bottom:2px">' + (m ? m + ' active' : 'No engine active') + ' · ' + where + '</div>' +
       '<div style="font-size:12px;color:#ddd;margin-bottom:2px">' + stat.msg + '</div>' +
-      '<div style="font-size:12px;color:#9ca3af;margin-bottom:10px">Replied ' + stat.done + ' / ' + cfg.maxRun + ' · Skipped ' + stat.skip + '</div>' +
+      '<div style="font-size:12px;color:#9ca3af;margin-bottom:10px">Replied ' + stat.done + ' / ' + (m ? ecfg(m, 'Max') : cfg.maxRun) + ' · Skipped ' + stat.skip + '</div>' +
+      (cfg.sea && cfg.seaUrl && !isSearchUrl() ? '<div data-act="gosea" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd;margin-bottom:8px">Open my search (SEA)</div>' : '') +
+      (cfg.fed && !isHomeUrl() ? '<div data-act="gofed" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd;margin-bottom:8px">Open home feed (FED)</div>' : '') +
       '<div data-act="auto" style="text-align:center;padding:12px 0;border-radius:12px;font-weight:800;background:' + (cfg.auto ? '#b91c1c' : '#6d28d9') + ';margin-bottom:8px">' + (cfg.auto ? 'STOP' : 'START') + '</div>' +
       '<div data-act="settings" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd">Settings</div>';
   }
@@ -548,6 +709,9 @@
       else if (!(cfg.sea || cfg.fed)) toast('Turn on SEA or FED first', 'warn');
       else if (!curMode()) toast('Open x.com/search (SEA) or x.com/home (FED)', 'warn');
       else { clearRun(); stat.done = 0; stat.skip = 0; patchCfg({ auto: true }); scan(); }
+    } else if (act === 'gosea') {
+      if (/^https:\/\/(x|twitter)\.com\/search/.test(String(cfg.seaUrl || ''))) location.href = cfg.seaUrl;
+    } else if (act === 'gofed') { location.href = '/home';
     } else if (act === 'settings') {
       if (window.ZenEng && window.ZenEng.openSettings) window.ZenEng.openSettings(); else toast('Update the app to open Engine settings', 'warn');
     }
