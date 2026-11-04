@@ -2587,7 +2587,7 @@ html.z1-ai-ui-off #z1-float,html.z1-ai-ui-off #z1-speech-bubble,html.z1-ai-ui-of
   <div style="background:var(--s1);border:1px solid var(--border2);border-radius:22px;padding:28px 24px;width:88%;max-width:340px;text-align:center;animation:profileSlideUp 0.3s cubic-bezier(.4,0,.2,1);">
     <div id="profile-modal-icon" style="font-size:36px;margin-bottom:12px;"><img src="https://raw.githubusercontent.com/asadul6969/Webapp---All-Gif-img-Vido/main/logout.gif" style="width:64px;height:64px;object-fit:contain;border-radius:12px;" alt="logout"></div>
     <div id="profile-modal-title" style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px;">Log out?</div>
-    <div id="profile-modal-body" style="font-size:13px;color:var(--muted);margin-bottom:22px;line-height:1.6;">Are you sure you want to log out of your account?</div>
+    <div id="profile-modal-body" style="font-size:13px;color:var(--muted);margin-bottom:22px;line-height:1.6;">This removes your X username and API keys saved on this device. Continue?</div>
     <div id="profile-modal-actions" style="display:flex;gap:10px;">
       <button onclick="closeProfileModal()" style="flex:1;padding:12px;border-radius:12px;background:var(--s3);border:1px solid var(--border2);color:var(--text);font-weight:600;font-size:14px;cursor:pointer;">Cancel</button>
       <button onclick="doProfileLogout();" style="flex:1;padding:12px;border-radius:12px;background:#ff4d4d;border:none;color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Log Out</button>
@@ -6610,25 +6610,16 @@ function closeProfileModal(){
   document.getElementById('profile-confirm-modal').style.display = 'none';
 }
 function doProfileLogout(){
-  // Stop coordinator on logout
-  try { if (typeof _coordIsActive !== "undefined") { _coordIsActive = false; if (_coordHeartbeatInterval) clearInterval(_coordHeartbeatInterval); if (coopDb) coopDb.ref(COORD_LOCK_PATH).remove().catch(()=>{}); } } catch(e) {}
-  // Close all overlays first
+  // local mode: no account. "Log Out" = remove X username + API keys from this device
   closeProfileModal();
   closeProfileSheet();
-  document.getElementById('main-menu-overlay').style.display = 'none';
-  // Clear auth data
-  _clearAuthUser();
-  // Clear any lingering session data
-  localStorage.removeItem('zc_session');
-  localStorage.removeItem('zc_active_file');
-  // Hide app, show auth
-  document.getElementById('auth-root').classList.remove('hidden');
-  _authShowPage('landing');
-  // Reset app state
-  posts = []; ownerPosts = []; fileQueue = [];
-  // Also hide the main app screens
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('upload-screen').classList.add('active');
+  try { document.getElementById('main-menu-overlay').style.display = 'none'; } catch(e){}
+  ['zl_profile','zl_keys','zl_z1g','zc_x_profile','zc_session','zc_active_file','zl_tf_code'].forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+  try { if (window.ZenX && ZenX.engKeysSet) ZenX.engKeysSet(JSON.stringify({gem:'',groq:'',oai:''})); } catch(e){}
+  try { _clearAuthUser(); } catch(e){}
+  try { zlApply(); } catch(e){}
+  toast('Removed from this device');
+  setTimeout(()=>location.reload(), 500);
 }
 
 function _makeTipHTML(preview){
@@ -17443,14 +17434,13 @@ function zrcMakeHud(host, title, withCmd, opts) {
       say('Saved'); d.classList.remove('open');
     };
   }
-  window.zlOpenSetup = function () { openProfile(); };
-  window.confirmProfileLogout = function () { try { closeProfileSheet(); } catch (e) {} openProfile(); };
-  window.zlOpenProfile = openProfile;
+  window.zlOpenSetup = function () { openProfileSheet(); };
+  window.confirmProfileLogout = function () { var m = $('profile-confirm-modal'); if (m) m.style.display = 'flex'; };
+  window.zlOpenProfile = function () { try { closeMainMenu(); } catch (e) {} openProfileSheet(); };
 
   // ---------- 6) menu: Profile -> new page, add ENGINE item ----------
   function menu() {
     var pn = $('profile-nav-btn');
-    if (pn) { pn.onclick = function (e) { if (e) e.stopPropagation(); openProfile(); }; pn.removeAttribute('onclick'); pn.addEventListener('click', function (e) { e.stopImmediatePropagation(); openProfile(); }, true); }
     if ($('mmenu-engine')) return;
     var anchor = $('api-btn') || $('settings-btn');
     if (!anchor || !anchor.parentNode) return;
