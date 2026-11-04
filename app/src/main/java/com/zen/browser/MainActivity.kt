@@ -3,6 +3,8 @@ package com.zen.browser
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.PictureInPictureParams
+import android.util.Rational
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.Manifest
@@ -189,8 +191,19 @@ class MainActivity : Activity() {
 
     private fun bgEnabled(): Boolean = bgPrefs().getBoolean("bg_on", true)
 
+    // pokes every WebView every few seconds so Chromium never idles them while the app is in the background
+    private val keepHandler = Handler(Looper.getMainLooper())
+    private val keepTick = object : Runnable {
+        override fun run() {
+            keepWebViewsRunning()
+            keepHandler.postDelayed(this, 3000)
+        }
+    }
+
     private fun startBackground() {
         if (!bgEnabled()) return
+        keepHandler.removeCallbacks(keepTick)
+        keepHandler.postDelayed(keepTick, 3000)
         // 1) notification permission (Android 13+): needed only so the "running" notification is visible
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 11)
@@ -207,6 +220,7 @@ class MainActivity : Activity() {
     }
 
     private fun stopBackground() {
+        keepHandler.removeCallbacks(keepTick)
         try {
             stopService(Intent(this, KeepAliveService::class.java))
         } catch (e: Exception) {
@@ -579,6 +593,11 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun open(url: String) {
             if (!url.startsWith("http")) return
+            // Z1 and the Engine page share one host, so host-based tab reuse would wrongly jump to the Z1 tab
+            if (url == ENG_URL) {
+                runOnUiThread { openEngSettings() }
+                return
+            }
             runOnUiThread { openUrl(url, true) }
         }
 
@@ -1322,6 +1341,20 @@ function s(){var q=document.getElementById('q').value.trim();if(q)Z.search(q);re
         super.onPause()
         CookieManager.getInstance().flush()
         keepWebViewsRunning()
+    }
+
+    // Home button while AUTO is running: shrink to a small floating window. A visible window keeps Android drawing frames,
+    // which X needs to keep loading new posts (a fully hidden app gets no frames, so the feed stops loading).
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < 26) return
+        try {
+            val running = JSONObject(engCfgGetStr()).optBoolean("auto", false)
+            if (running) {
+                enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(9, 16)).build())
+            }
+        } catch (e: Exception) {
+        }
     }
 
     override fun onStop() {
