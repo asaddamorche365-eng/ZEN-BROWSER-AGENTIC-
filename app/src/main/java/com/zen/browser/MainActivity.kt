@@ -51,6 +51,7 @@ import org.json.JSONTokener
 private const val SEARCH_URL = "https://duckduckgo.com/?q="   // search engine used by the home search box
 private const val X_URL = "https://x.com/home"
 private const val APP_HOST = "appassets.androidplatform.net"
+private const val ENG_URL = "https://$APP_HOST/assets/zenx/engine.html"   // SEA/FED settings page
 private const val Z1_URL = "https://$APP_HOST/assets/z1/index.html"   // Z1 is bundled inside the app (assets/z1)
 private const val TG_URL = "https://web.telegram.org/"
 // Desktop mode = same system as Fulguris: desktop UA + wide viewport + injected meta viewport at N% of the real width (Fulguris default 200)
@@ -368,7 +369,8 @@ class MainActivity : Activity() {
             "Clear cookies & site data",
             if (bgEnabled()) "Background run: ON  (tap = off)" else "Background run: OFF  (tap = on)",
             "Battery: allow unrestricted",
-            "Engine API keys (SEA/FED)"
+            "Engine API keys (SEA/FED)",
+            "Engine settings (SEA/FED)"
         )
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setItems(items) { _, i ->
@@ -389,6 +391,7 @@ class MainActivity : Activity() {
                     }
                     7 -> askBattery()
                     8 -> showEngKeys()
+                    9 -> openEngSettings()
                     5 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
@@ -646,6 +649,28 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun version(): String = "zenx-1"
 
+        // ---- SEA/FED engine settings page (assets/zenx/engine.html) ----
+        @JavascriptInterface
+        fun engCfgGet(): String = engCfgGetStr()
+
+        @JavascriptInterface
+        fun engCfgSet(patchJson: String) {
+            engCfgMerge(patchJson)
+        }
+
+        @JavascriptInterface
+        fun engKeyInfo(): String {
+            val sp = engPrefs()
+            return JSONObject().put("gem", !(sp.getString("gem", "") ?: "").isEmpty())
+                .put("groq", !(sp.getString("groq", "") ?: "").isEmpty())
+                .put("oai", !(sp.getString("oai", "") ?: "").isEmpty()).toString()
+        }
+
+        @JavascriptInterface
+        fun openEngKeys() {
+            runOnUiThread { showEngKeys() }
+        }
+
         @JavascriptInterface
         fun xLoggedIn(): Boolean = isXLoggedIn()
 
@@ -692,6 +717,28 @@ class MainActivity : Activity() {
 
     private fun engPrefs() = getSharedPreferences("zen_eng", Context.MODE_PRIVATE)
 
+    private val engCfgKeys = arrayOf("sea", "fed", "auto", "like", "likePct", "target", "targetKw", "tone", "style",
+        "keyword", "maxRun", "paceMin", "paceMax", "ageOn", "ageMinMin", "ageMaxMin", "myHandle")
+
+    private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
+
+    private fun engCfgMerge(patchJson: String) {
+        try {
+            val cur = JSONObject(engCfgGetStr())
+            val p = JSONObject(patchJson)
+            for (k in engCfgKeys) {
+                if (p.has(k)) cur.put(k, p.get(k))
+            }
+            engPrefs().edit().putString("cfg", cur.toString()).apply()
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun openEngSettings() {
+        val idx = tabs.indexOfFirst { !it.isHome && (it.web.url ?: "") == ENG_URL }
+        if (idx >= 0) switchTo(idx) else newTab(false, ENG_URL)
+    }
+
     private fun engDeliver(owner: WebView, cbId: String, json: String) {
         runOnUiThread {
             if (tabs.any { it.web === owner }) {
@@ -704,6 +751,20 @@ class MainActivity : Activity() {
     }
 
     inner class EngBridge(private val owner: WebView) {
+        // runtime toggles + settings live in SharedPreferences; the settings page edits the same store
+        @JavascriptInterface
+        fun getCfg(): String = engCfgGetStr()
+
+        @JavascriptInterface
+        fun setCfg(patchJson: String) {
+            engCfgMerge(patchJson)
+        }
+
+        @JavascriptInterface
+        fun openSettings() {
+            runOnUiThread { openEngSettings() }
+        }
+
         @JavascriptInterface
         fun gen(prompt: String, callbackId: String) {
             // WebView.getUrl() must run on the UI thread; JS bridge calls arrive on a background thread
@@ -1238,6 +1299,7 @@ button{padding:0 22px;border:1px solid #333;border-left:0;border-radius:0 26px 2
 <div class="g">
 <div class="t" onclick="Z.open('$X_URL')"><div class="i" style="background:#111;border:1px solid #333">X</div>X</div>
 <div class="t" onclick="Z.open('$Z1_URL')"><div class="i" style="background:#6d28d9">Z1</div>Z1</div>
+<div class="t" onclick="Z.open('$ENG_URL')"><div class="i" style="background:#15803d">ENG</div>Engine</div>
 <div class="t" onclick="Z.open('$TG_URL')"><div class="i" style="background:#229ed9">TG</div>Telegram</div>
 </div>
 <script>
