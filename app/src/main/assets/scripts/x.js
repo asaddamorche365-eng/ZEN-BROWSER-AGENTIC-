@@ -10,7 +10,7 @@
   var CK = 'zenEngCfg', RK = 'zenEngReplied';
   var DEF = { sea: false, fed: false, auto: false, like: false, likePct: 100, target: false, targetKw: '',
     tone: 'Positive', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
-    ageOn: false, ageMinMin: 0, ageMaxMin: 60, skipReplies: true };
+    ageOn: false, ageMinMin: 0, ageMaxMin: 60, skipReplies: true, myHandle: '' };
   function loadCfg() { var c = {}; try { c = JSON.parse(localStorage.getItem(CK) || '{}') || {}; } catch (e) {} var o = {}; for (var k in DEF) o[k] = (k in c) ? c[k] : DEF[k]; return o; }
   var cfg = loadCfg();
   function saveCfg() { try { localStorage.setItem(CK, JSON.stringify(cfg)); } catch (e) {} }
@@ -51,9 +51,10 @@
     for (var i = 0; i < ls.length; i++) { var m = /^\/([A-Za-z0-9_]+)$/.exec(ls[i].getAttribute('href') || ''); if (m) return m[1].toLowerCase(); }
     return null;
   }
-  var AD = ['ad', 'ads', 'promoted', 'sponsored', 'anzeige', 'publicidad', 'promocionado', 'publicité', 'реклама', 'reklam', 'iklan', 'বিজ্ঞাপন', '広告', '광고', '推广', '廣告'];
+  var AD = ['boosted', 'ad', 'ads', 'promoted', 'sponsored', 'anzeige', 'publicidad', 'promocionado', 'publicité', 'реклама', 'reklam', 'iklan', 'বিজ্ঞাপন', '広告', '광고', '推广', '廣告'];
   function isAd(a) {
     if (a.dataset && a.dataset.zengAd === '1') return true;
+    if (a.closest('[data-testid="placementTracking"]')) { a.dataset.zengAd = '1'; return true; }
     var ns = a.querySelectorAll('span,div');
     for (var i = 0; i < ns.length; i++) {
       var n = ns[i]; if (n.children.length) continue;
@@ -66,30 +67,43 @@
   }
   var ownH = null;
   function ownHandle() {
+    var mh = String(cfg.myHandle || '').replace(/^@/, '').trim().toLowerCase();
+    if (mh) return mh;
     if (ownH) return ownH;
     var b = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
     var m = b && /@([A-Za-z0-9_]{1,15})/.exec(b.textContent || ''); if (m) ownH = m[1].toLowerCase();
     if (!ownH) { var p = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]'); var h = p && /^\/([A-Za-z0-9_]+)$/.exec(p.getAttribute('href') || ''); if (h) ownH = h[1].toLowerCase(); }
     return ownH;
   }
+  function learnOwnFromComposer() {   // the composer's own avatar is the last avatar inside the reply dialog
+    if (ownHandle()) return;
+    var d = document.querySelector('[aria-modal="true"]') || document;
+    var av = $$('[data-testid^="UserAvatar-Container-"]', d); if (!av.length) return;
+    var id = (av[av.length - 1].getAttribute('data-testid') || '').replace('UserAvatar-Container-', '').toLowerCase();
+    if (/^[a-z0-9_]{1,15}$/.test(id)) { ownH = id; }
+  }
   function isOwn(a) { var o = ownHandle(), au = author(a); return !!(o && au && o === au); }
   var REPLYING = /^\s*(replying to|en réponse à|en respuesta a|antwort an|em resposta a|in risposta a|в ответ|yanıt olarak|membalas|balasan untuk)\b/i;
-  function isReply(a) {   // search results can be comments; SEA is for original posts
+  function isReply(a) {   // any post that is a comment ("Replying to ...")
     try {
       var head = a.querySelector('[data-testid="User-Name"]'); if (!head) return false;
       var body = a.querySelector('[data-testid="tweetText"]');
+      var sc = a.querySelector('[data-testid="socialContext"]');
+      if (sc && REPLYING.test(sc.textContent || '')) return true;
       var ls = a.querySelectorAll('a[href^="/"]');
       for (var i = 0; i < ls.length; i++) {
         var l = ls[i]; if ((l.textContent || '').trim().charAt(0) !== '@') continue;
         if (head.contains(l)) continue;
         if (!(head.compareDocumentPosition(l) & 4)) continue;
         if (body && (body.contains(l) || !(l.compareDocumentPosition(body) & 4))) continue;
-        var row = l.parentElement, txt = '';
-        while (row && row !== a && txt.length < 3) { txt = (row.parentElement ? row.parentElement.textContent : '') || ''; if (REPLYING.test(txt)) return true; row = row.parentElement; if (row && row.contains(head)) break; }
+        var row = l.parentElement;
+        for (var up = 0; up < 4 && row && row !== a; up++, row = row.parentElement) {
+          if (row.contains(head) || (body && row.contains(body))) break;
+          if (REPLYING.test(row.textContent || '')) return true;
+        }
       }
-      var sc = a.querySelector('[data-testid="socialContext"]');
-      return !!(sc && REPLYING.test(sc.textContent || ''));
-    } catch (e) { return false; }
+    } catch (e) {}
+    return false;
   }
   function ageVerdict(a) {   // SEA post age window (minutes)
     if (!cfg.ageOn) return 'ok';
@@ -176,7 +190,7 @@
       if (!w && a.parentElement) w = a.parentElement.querySelector('[data-testid="tweetTextarea_0"]');
       if (!w && /\/compose\//.test(location.pathname)) w = document.querySelector('[data-testid="tweetTextarea_0"]');
       if (!w) w = document.querySelector('[data-testid="tweetTextarea_0"]');
-      var ed = editorOf(w); if (ed) { await sleep(300); return liveEditor() || ed; }
+      var ed = editorOf(w); if (ed) { await sleep(300); learnOwnFromComposer(); return liveEditor() || ed; }
     }
     return null;
   }
@@ -323,6 +337,7 @@
       var v = ageVerdict(a); if (v !== 'ok') { done.add(a); if (v === 'old') { var o = statusId(a); if (o) oldSeen[o] = 1; } return; }
     } else {
       if (!te || !txt(te).trim()) { done.add(a); return; }
+      if (cfg.skipReplies && isReply(a)) { done.add(a); return; }
       if (!targetOk(txt(te))) { done.add(a); return; }
     }
     done.add(a);
@@ -346,7 +361,9 @@
     return false;
   }
   async function autoLoop(eng) {
-    if (autoRunning) return; autoRunning = true; runCount = 0;
+    if (autoRunning) return;
+    if (!ownHandle()) { cfg.auto = false; saveCfg(); renderPanel(); toast('Auto stopped: type your @handle in the Z panel first (so it never replies to your own posts)', 'warn'); return; }
+    autoRunning = true; runCount = 0;
     var none = 0, cls = tag[eng];
     try {
       while (cfg.auto && curMode() === eng && runCount < cfg.maxRun) {
@@ -402,9 +419,9 @@
       row('Tone', '<select data-k="tone" style="background:#111;color:#fff;border:1px solid #444;border-radius:8px;padding:6px">' + tones + '</select>') +
       row('Style', inp('style', 150)) + row('Keyword', inp('keyword', 150)) +
       row('FED target filter', chk('target')) + row('Target words (a,b,c)', inp('targetKw', 130)) +
-      row('SEA skip comments', chk('skipReplies')) + row('SEA age limit', chk('ageOn')) +
+      row('Skip comments (SEA+FED)', chk('skipReplies')) + row('SEA age limit', chk('ageOn')) +
       row('Age min / max (min)', inp('ageMinMin', 48, 'number') + inp('ageMaxMin', 48, 'number')) +
-      row('Max per run', inp('maxRun', 60, 'number')) + row('Pause min / max (s)', inp('paceMin', 48, 'number') + inp('paceMax', 48, 'number')) +
+      row('My @handle', inp('myHandle', 130)) + row('Max per run', inp('maxRun', 60, 'number')) + row('Pause min / max (s)', inp('paceMin', 48, 'number') + inp('paceMax', 48, 'number')) +
       '<div style="font-size:11px;color:#999;margin-top:6px">SEA works on x.com/search, FED on x.com/home. API keys: Menu → Engine API keys.</div>';
     $$('[data-k]', p).forEach(function (el) {
       el.onchange = function () {
