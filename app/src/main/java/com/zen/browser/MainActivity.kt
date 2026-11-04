@@ -41,7 +41,10 @@ import android.widget.Toast
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import org.json.JSONTokener
 
 // ---------------- CONFIG (edit these) ----------------
@@ -364,7 +367,8 @@ class MainActivity : Activity() {
             "Copy URL",
             "Clear cookies & site data",
             if (bgEnabled()) "Background run: ON  (tap = off)" else "Background run: OFF  (tap = on)",
-            "Battery: allow unrestricted"
+            "Battery: allow unrestricted",
+            "Engine API keys (SEA/FED)"
         )
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setItems(items) { _, i ->
@@ -384,6 +388,7 @@ class MainActivity : Activity() {
                         toast(if (on) "Background run: ON" else "Background run: OFF")
                     }
                     7 -> askBattery()
+                    8 -> showEngKeys()
                     5 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
@@ -510,6 +515,8 @@ class MainActivity : Activity() {
             installScripts(wv)
             // X session bridge: ONLY the bundled Z1 tab. Never x.com / other sites.
             if (isZ1) wv.addJavascriptInterface(Z1Bridge(wv), "ZenX")
+            // SEA/FED engine bridge: every web tab gets it, but each call checks the tab is really on x.com
+            else wv.addJavascriptInterface(EngBridge(wv), "ZenEng")
         }
 
         wv.webViewClient = object : WebViewClient() {
@@ -674,6 +681,180 @@ class MainActivity : Activity() {
                 startSearch(keyword, type, minLikes, minViews, maxResults) { json -> deliver(owner, callbackId, json) }
             }
         }
+    }
+
+
+    // =====================================================================
+    //  SEA / FED ENGINE BRIDGE  (assets/scripts/x.js -> window.ZenEng)
+    //  Only gen() is exposed. API keys stay in SharedPreferences "zen_eng" and never reach the page.
+    //  Result: window.__zenEngCb(callbackId, jsonString)  ->  {ok:true,text} | {ok:false,error}
+    // =====================================================================
+
+    private fun engPrefs() = getSharedPreferences("zen_eng", Context.MODE_PRIVATE)
+
+    private fun engDeliver(owner: WebView, cbId: String, json: String) {
+        runOnUiThread {
+            if (tabs.any { it.web === owner }) {
+                val lit = JSONObject.quote(json).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+                val js = "(function(){try{var f=window.__zenEngCb;if(typeof f==='function')f(" +
+                    JSONObject.quote(cbId) + "," + lit + ");}catch(e){}})();"
+                owner.evaluateJavascript(js, null)
+            }
+        }
+    }
+
+    inner class EngBridge(private val owner: WebView) {
+        @JavascriptInterface
+        fun gen(prompt: String, callbackId: String) {
+            val host = try { Uri.parse(owner.url ?: "").host } catch (e: Exception) { null }
+            if (!isXHost(host)) {
+                engDeliver(owner, callbackId, JSONObject().put("ok", false).put("error", "not_x_page").toString())
+                return
+            }
+            val p = if (prompt.length > 6000) prompt.substring(0, 6000) else prompt
+            Thread {
+                val out = try {
+                    JSONObject().put("ok", true).put("text", engGenerate(p)).toString()
+                } catch (e: Exception) {
+                    JSONObject().put("ok", false).put("error", e.message ?: "AI failed").toString()
+                }
+                engDeliver(owner, callbackId, out)
+            }.start()
+        }
+    }
+
+    private fun engHttpPost(url: String, bearer: String, body: String): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.requestMethod = "POST"
+            c.connectTimeout = 15000
+            c.readTimeout = 30000
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            if (bearer.isNotEmpty()) c.setRequestProperty("Authorization", "Bearer " + bearer)
+            c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = c.responseCode
+            val stream = if (code in 200..299) c.inputStream else c.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (code !in 200..299) throw Exception("API " + code + " " + text.take(120))
+            return text
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    private fun engGeminiCall(key: String, prompt: String): String {
+        val models = arrayOf("gemini-flash-lite-latest", "gemini-flash-latest")
+        var last: Exception = Exception("Gemini failed")
+        for (m in models) {
+            try {
+                val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt))))).toString()
+                val res = engHttpPost("https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent?key=" + key, "", body)
+                val t = JSONObject(res).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                if (t.isNotEmpty()) return t
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last
+    }
+
+    private fun engChatCall(url: String, key: String, model: String, prompt: String): String {
+        val body = JSONObject().put("model", model).put("max_tokens", 120).put("temperature", 0.85)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).toString()
+        val res = engHttpPost(url, key, body)
+        val t = JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content").trim()
+        if (t.isEmpty()) throw Exception("empty reply")
+        return t
+    }
+
+    // tries Gemini, then Groq, then OpenAI (whatever keys are saved)
+    private fun engGenerate(prompt: String): String {
+        val sp = engPrefs()
+        val gem = sp.getString("gem", "") ?: ""
+        val groq = sp.getString("groq", "") ?: ""
+        val oai = sp.getString("oai", "") ?: ""
+        if (gem.isEmpty() && groq.isEmpty() && oai.isEmpty()) throw Exception("No API key - Menu > Engine API keys")
+        var last = "AI failed"
+        if (gem.isNotEmpty()) {
+            try { return engGeminiCall(gem, prompt) } catch (e: Exception) { last = "Gemini: " + (e.message ?: "") }
+        }
+        if (groq.isNotEmpty()) {
+            for (m in arrayOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")) {
+                try { return engChatCall("https://api.groq.com/openai/v1/chat/completions", groq, m, prompt) } catch (e: Exception) { last = "Groq: " + (e.message ?: "") }
+            }
+        }
+        if (oai.isNotEmpty()) {
+            try { return engChatCall("https://api.openai.com/v1/chat/completions", oai, "gpt-4o-mini", prompt) } catch (e: Exception) { last = "OpenAI: " + (e.message ?: "") }
+        }
+        throw Exception(last)
+    }
+
+    private fun showEngKeys() {
+        val sp = engPrefs()
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(10), dp(20), 0)
+        fun field(hint: String, saved: String): EditText {
+            val e = EditText(this)
+            e.setTextColor(Color.WHITE)
+            e.setHintTextColor(Color.GRAY)
+            e.hint = if (saved.isNotEmpty()) hint + " (saved - type to replace)" else hint
+            e.setSingleLine(true)
+            box.addView(e, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            return e
+        }
+        val gem = field("Gemini key (AIza...)", sp.getString("gem", "") ?: "")
+        val groq = field("Groq key (gsk_...)", sp.getString("groq", "") ?: "")
+        val oai = field("OpenAI key (sk-...)", sp.getString("oai", "") ?: "")
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Engine API keys")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                val ed = sp.edit()
+                if (gem.text.toString().trim().isNotEmpty()) ed.putString("gem", gem.text.toString().trim())
+                if (groq.text.toString().trim().isNotEmpty()) ed.putString("groq", groq.text.toString().trim())
+                if (oai.text.toString().trim().isNotEmpty()) ed.putString("oai", oai.text.toString().trim())
+                ed.apply()
+                toast("Saved")
+            }
+            .setNeutralButton("Import from Z1") { _, _ -> importZ1Keys() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // Z1 keeps keys in localStorage "zl_keys" of the appassets origin: a hidden page on that origin can read it
+    private fun importZ1Keys() {
+        val wv = WebView(this)
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                return assetLoader.shouldInterceptRequest(request.url)
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                view.evaluateJavascript("localStorage.getItem('zl_keys')") { raw ->
+                    var n = 0
+                    try {
+                        val s = JSONTokener(raw).nextValue() as? String
+                        if (s != null) {
+                            val o = JSONObject(s)
+                            val ed = engPrefs().edit()
+                            for (k in arrayOf("gem", "oai", "groq")) {
+                                val v = o.optString(k, "")
+                                if (v.isNotEmpty()) { ed.putString(k, v); n++ }
+                            }
+                            ed.apply()
+                        }
+                    } catch (e: Exception) {
+                    }
+                    toast(if (n > 0) "Imported $n key(s) from Z1" else "No keys found in Z1")
+                    try { view.destroy() } catch (e: Exception) { }
+                }
+            }
+        }
+        wv.loadUrl("https://$APP_HOST/assets/z1/manifest.json")
     }
 
     // ---------------- fetch starters (all on UI thread) ----------------
