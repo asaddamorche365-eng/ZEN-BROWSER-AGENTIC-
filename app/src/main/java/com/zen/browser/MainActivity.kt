@@ -305,11 +305,41 @@ class MainActivity : Activity() {
         switchTo(tabs.size - 1)
     }
 
+    // true while the SEA/FED engine is running in AUTO mode (cfg "auto")
+    private fun engineAutoOn(): Boolean {
+        return try {
+            JSONObject(engCfgGetStr()).optBoolean("auto", false)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // an x.com / twitter.com web tab (not Home, not Z1)
+    private fun isXWebTab(t: Tab): Boolean {
+        if (t.isHome || t.isZ1) return false
+        val host: String? = try {
+            Uri.parse(t.web.url ?: "").host
+        } catch (e: Exception) {
+            null
+        }
+        return isXHost(host)
+    }
+
     private fun switchTo(i: Int) {
         if (i < 0 || i >= tabs.size) return
         cur = i
+        val autoOn = engineAutoOn()
         for ((idx, t) in tabs.withIndex()) {
-            t.web.visibility = if (idx == i) View.VISIBLE else View.GONE
+            if (idx == i) {
+                t.web.visibility = View.VISIBLE
+                t.web.bringToFront()
+            } else if (autoOn && isXWebTab(t)) {
+                // Engine AUTO is running in this X tab: keep it VISIBLE (it stays behind the active tab, which is opaque).
+                // A GONE WebView gets no frames and X stops loading posts, so the engine would stall while you watch YouTube in another tab.
+                t.web.visibility = View.VISIBLE
+            } else {
+                t.web.visibility = View.GONE
+            }
         }
         updateTabsBtn()
     }
@@ -780,6 +810,8 @@ class MainActivity : Activity() {
                 if (p.has(k)) cur.put(k, p.get(k))
             }
             engPrefs().edit().putString("cfg", cur.toString()).apply()
+            // AUTO switched on/off: re-apply tab visibility so the X tab keeps running (or is released) in the background
+            if (p.has("auto")) runOnUiThread { switchTo(this.cur) }
         } catch (e: Exception) {
         }
     }
