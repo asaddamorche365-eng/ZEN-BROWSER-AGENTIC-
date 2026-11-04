@@ -147,10 +147,11 @@
   function ensureBack(el) {
     if (!el || el.querySelector('.zl-nav')) return;
     var bar = document.createElement('div'); bar.className = 'zl-nav';
+    var nv = null; try { if (el.id === 'engine-screen' && window.zlEngNav) nv = window.zlEngNav(); } catch (e) {}   // Engine: sub screens go back to the engine list
     var b = document.createElement('button'); b.className = 'zl-back'; b.type = 'button';
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg> Home';
-    b.onclick = goHome;
-    var t = document.createElement('div'); t.className = 'zl-pt'; t.textContent = TITLES[el.id] || '';
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg> ' + (nv ? nv.back : 'Home');
+    b.onclick = (nv && nv.fn) ? nv.fn : goHome;
+    var t = document.createElement('div'); t.className = 'zl-pt'; t.textContent = nv ? nv.title : (TITLES[el.id] || '');
     bar.appendChild(b); bar.appendChild(t);
     el.insertBefore(bar, el.firstChild);
   }

@@ -17215,26 +17215,61 @@ function zrcMakeHud(host, title, withCmd, opts) {
     '.zp-badge{display:inline-block;padding:3px 9px;border-radius:9px;font:700 10px Space Mono,monospace;background:var(--s3);color:var(--muted)}',
     '.zp-badge.on{background:rgba(16,185,129,.18);color:#6ee7b7}',
     '.zp-note{font:400 10px Space Mono,monospace;color:var(--muted);line-height:1.5;margin-top:6px}',
+    '.zp-hero{background:rgba(124,90,245,.12);border:1px solid rgba(124,90,245,.4);border-radius:16px;padding:16px 12px;text-align:center;margin-bottom:14px}',
+    '.zp-hero .t{font:800 16px DM Sans,sans-serif;color:var(--text)}',
+    '.zp-hero .s{font:700 12px DM Sans,sans-serif;color:var(--accent3);margin-top:6px}',
+    '.zp-ag{display:flex;align-items:center;gap:13px;width:100%;background:var(--s1);border:1px solid var(--border2);border-radius:18px;padding:13px 14px;margin-bottom:10px;text-align:left;color:var(--text)}',
+    '.zp-ag .ic{width:46px;height:46px;border-radius:14px;border:1px solid rgba(124,90,245,.55);background:rgba(124,90,245,.1);display:flex;align-items:center;justify-content:center;flex:none}',
+    '.zp-ag .ic svg{width:22px;height:22px;stroke:var(--accent3);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}',
+    '.zp-ag .tx{flex:1;min-width:0}',
+    '.zp-ag .tx b{display:block;font:800 15px DM Sans,sans-serif;color:var(--text)}',
+    '.zp-ag .tx small{display:block;font:400 12px DM Sans,sans-serif;color:var(--muted);margin-top:3px;line-height:1.35}',
+    '.zp-ag .ar{font:400 22px DM Sans,sans-serif;color:var(--muted);flex:none}',
+    '.zp-sg{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}',
+    '.zp-sg button{flex:1 1 28%;padding:10px 4px;border-radius:10px;border:1px solid var(--border2);background:var(--s2);color:var(--text);font:700 11px Space Mono,monospace}',
+    '.zp-sg button.on{background:rgba(124,90,245,.2);border-color:var(--accent);color:var(--accent3)}',
+    '.zp-title{font:800 13px DM Sans,sans-serif;color:var(--text)}',
+    '.zp-u{font:400 11px Space Mono,monospace;color:var(--muted)}',
+    '.zp-in.sm2{width:54px;text-align:center;padding:8px 2px}',
+    '.zp-warn{margin-top:10px;padding:9px 11px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:10px;color:#fbbf24;font:400 11px DM Sans,sans-serif;line-height:1.5}',
+    '.zp-tnote{margin:0 0 12px;padding:10px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:12px;color:#fbbf24;font:400 12px DM Sans,sans-serif;line-height:1.5}',
+    '.zp-tnote b{color:var(--text)}',
+    '.zp-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}',
+    '.zp-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(124,90,245,.18);border:1px solid var(--accent);color:var(--accent3);border-radius:9px;padding:5px 6px 5px 10px;font:600 12px DM Sans,sans-serif}',
+    '.zp-tag button{background:none;border:0;color:var(--accent3);font:700 15px DM Sans,sans-serif;padding:0 4px;line-height:1}',
+    '.zp-qbox{border:1.5px solid var(--border2);border-radius:12px;padding:8px;margin:0 0 8px}',
+    '.zp-qbox.on{border-color:var(--gold)}',
+    '.zp-qtop{display:flex;align-items:center;gap:8px;margin:0 0 6px}',
+    '.zp-qtop .zp-in{flex:1;min-width:0}',
+    '.zp-x{flex:none;width:34px;height:34px;border-radius:9px;background:transparent;border:1.5px solid var(--border2);color:var(--muted);font:700 14px DM Sans,sans-serif}',
+    '.zp-mono{font:11px Space Mono,monospace!important}',
+    '.zp-code{font:11px Space Mono,monospace;color:var(--accent3);background:var(--s2);border:1px solid var(--border2);border-radius:10px;padding:9px 10px;word-break:break-word;line-height:1.5;min-height:18px}',
     '#zp-profile{position:fixed;inset:0;z-index:2147482000;background:var(--bg);overflow:auto;display:none}',
     '#zp-profile.open{display:block}'
   ].join('\n');
   document.head.appendChild(css);
 
-  // ---------- 4) ENGINE screen (replaces the separate engine.html page) ----------
-  var TONES = ['Smart', 'Funny', 'Professional', 'Supportive', 'Witty', 'Curious', 'Short', 'Human', 'Alpha', 'Positive', 'PositiveQuestion', 'Helpful', 'Master', 'Custom', 'Auto'];
-  var TLBL = { Professional: 'Pro', Supportive: 'Support', PositiveQuestion: 'Pos.Q' };
-  var GRAM = TONES.filter(function (t) { return t !== 'Custom'; });
-  var BIGT = TONES.filter(function (t) { return t !== 'Custom' && t !== 'Auto'; });
-  var DEF = { sea: false, fed: false, like: false, likePct: 100, target: false, targetKw: '', tone: 'Smart', style: '', keyword: '',
-    maxRun: 40, paceMin: 4, paceMax: 9, ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '',
-    grammar: {}, bigOn: false, bigWords: '', bigTone: 'Smart', customTone: '', customWords: '',
-    tUi: 'classic', tMode: 'fast', tPer: 40, tBreakEvery: 50, tBreakMin: 30, tBreakMax: 50 };
-  var cfg = {}, tab = 'run';
+  // ---------- 4) ENGINE screen: list of separate engines (Timing / FED / SEA), each with its own sub-screen ----------
+  // Same layout idea as the extension's Agents page. Tone / grammar / big reply / custom tone / style live in the Settings sheet (not here).
+  var DEF = { sea: false, fed: false, like: false, likePct: 100, maxRun: 40, keyword: '', target: false, targetKw: '',
+    ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '',
+    tUi: 'classic', tMode: 'fast', tMethod: 'per', tPer: 40, tN: 50, tTotal: 1200, tBreakEvery: 50, tBreakMin: 30, tBreakMax: 50,
+    cSpeed: 'normal', cGap: 5, ldMin: 0, ldMax: 0,
+    seaKw: [], seaQs: [], seaQActive: '', seaRes: 'top', seaFMedia: false, seaFReplies: false, seaFVerified: false, seaFLinks: false, seaFRt: false,
+    seaMinRep: '', seaMinFav: '', seaLang: '', seaWithin: '', seaUrl: '',
+    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30 };
+  var cfg = {}, view = 'home', qShown = 3;
+  var VIEW_TITLE = { timing: 'Timing', fed: 'FED Engine', sea: 'Search Engine' };
   function loadCfg() {
     var c = {}; try { c = JSON.parse(B.engCfgGet() || '{}') || {}; } catch (e) {}
     cfg = {}; for (var k in DEF) cfg[k] = (k in c) ? c[k] : DEF[k];
-    if (TONES.indexOf(cfg.tone) < 0) cfg.tone = 'Smart';
-    if (!cfg.grammar || typeof cfg.grammar !== 'object') cfg.grammar = {};
+    ['sea', 'fed'].forEach(function (p) {   // per-engine copies of Like / Like % / Max / Keyword (start from the old shared value)
+      [['Like', 'like'], ['LikePct', 'likePct'], ['Max', 'maxRun'], ['Keyword', 'keyword']].forEach(function (m) {
+        var k = p + m[0]; cfg[k] = (c[k] != null) ? c[k] : (c[m[1]] != null ? c[m[1]] : DEF[m[1]]);
+      });
+    });
+    if (!Array.isArray(cfg.seaKw)) cfg.seaKw = [];
+    if (!Array.isArray(cfg.seaQs)) cfg.seaQs = [];
   }
   function save(p) {
     for (var k in p) cfg[k] = p[k];
@@ -17243,134 +17278,320 @@ function zrcMakeHud(host, title, withCmd, opts) {
   function sw(id, on) { return '<label class="zp-sw"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '><i></i></label>'; }
   function row(l, sub, ctl) { return '<div class="zp-row"><div class="l">' + l + (sub ? '<small>' + sub + '</small>' : '') + '</div>' + ctl + '</div>'; }
   function num(id, v, mn) { return '<input class="zp-in sm" id="' + id + '" type="number" min="' + (mn == null ? 0 : mn) + '" value="' + esc(v) + '">'; }
+  function sg(act, items, cur) {   // segmented buttons
+    return '<div class="zp-sg">' + items.map(function (it) { return '<button type="button" class="' + (cur === it[0] ? 'on' : '') + '" data-act="' + act + '" data-v="' + it[0] + '">' + it[1] + '</button>'; }).join('') + '</div>';
+  }
+  var IC = {
+    timing: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 2h6"/></svg>',
+    fed: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M4.9 19.1a10 10 0 1 1 14.2 0"/><path d="M7.8 16.2a6 6 0 1 1 8.4 0"/></svg>',
+    sea: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+  };
+  function goX(url) {
+    try { if (B.openXUrl) B.openXUrl(url); else { B.openX(); say('Update the app to open this page directly', 'error'); } } catch (e) { say('Run Z1 inside ZEN browser', 'error'); }
+  }
 
-  function tRun() {
-    return '<div class="zp-card"><div class="zp-lbl">ENGINES</div>' +
-      row('SEA — search replies', 'Buttons on x.com/search posts', sw('e-sea', cfg.sea)) +
-      row('FED — home feed replies', 'Buttons on x.com/home posts', sw('e-fed', cfg.fed)) +
-      '<div class="zp-note">Start / Stop is the floating <b>Z</b> button inside X.</div></div>' +
-      '<div class="zp-card"><div class="zp-lbl">RUN</div>' +
-      row('Max replies per run', '', num('e-maxRun', cfg.maxRun, 1)) +
-      row('Like before reply', '', sw('e-like', cfg.like)) +
-      row('Like chance %', '', num('e-likePct', cfg.likePct, 0)) +
-      row('Keyword', 'used naturally in the reply', '<input class="zp-in" id="e-keyword" style="width:150px" value="' + esc(cfg.keyword) + '">') + '</div>';
-  }
-  function tTone() {
-    var chips = TONES.map(function (t) {
-      return '<button class="zp-chip' + (cfg.tone === t ? ' on' : '') + (t === 'Custom' || t === 'Auto' ? ' gold' : '') + '" data-tone="' + t + '">' + (TLBL[t] || t) + '</button>';
-    }).join('');
-    var gr = GRAM.map(function (t) {
-      return row(t === 'Auto' ? 'Auto Mix' : t, '', sw('g-' + t, cfg.grammar[t] !== false));
-    }).join('');
-    var bt = BIGT.map(function (t) { return '<option value="' + t + '"' + (cfg.bigTone === t ? ' selected' : '') + '>' + t + '</option>'; }).join('');
-    return '<div class="zp-card"><div class="zp-lbl">REPLY TONE</div><div class="zp-chips" id="e-tones">' + chips + '</div>' +
-      '<div class="zp-note">Auto = random tone every reply, never the same one twice in a row.</div></div>' +
-      '<div class="zp-card"><div class="zp-lbl">USE GRAMMAR</div>' +
-      '<div class="zp-note" style="margin:0 0 8px">Turn a tone OFF if you want the AI to write naturally without fixing grammar.</div>' +
-      '<div class="zp-fold" id="g-fold"><span>USE GRAMMAR</span><span id="g-arrow">▼</span></div>' +
-      '<div id="g-list" style="display:none;margin-top:6px">' + gr + '</div></div>' +
-      '<div class="zp-card"><div class="zp-lbl">BIG REPLY CONFIG</div>' +
-      '<div class="zp-note" style="margin:0 0 6px">By default replies are short. Turn this on to get your own word count and tone.</div>' +
-      row('Big Reply Mode', 'uses the word count & tone below', sw('b-on', cfg.bigOn)) +
-      row('Word count', 'e.g. 50-80 or 100', '<input class="zp-in" id="b-words" style="width:120px" placeholder="50-80" value="' + esc(cfg.bigWords) + '">') +
-      row('Tone', '', '<select class="zp-in" id="b-tone" style="width:150px">' + bt + '</select>') +
-      '<button class="zp-btn ghost" id="b-reset" style="margin-top:8px">↺ Reset to default</button></div>' +
-      '<div class="zp-card"><div class="zp-lbl">CUSTOM TONE</div>' +
-      '<textarea class="zp-in" id="c-prompt" placeholder="e.g. Reply like a casual friend who is very knowledgeable about crypto. Keep it fun and real.">' + esc(cfg.customTone) + '</textarea>' +
-      row('Word limit', '', '<input class="zp-in sm" id="c-words" placeholder="30" value="' + esc(cfg.customWords) + '">') +
-      '<div class="zp-note">Used when the tone is set to Custom.</div></div>' +
-      '<div class="zp-card"><div class="zp-lbl">REPLY STYLE (YOUR VOICE)</div>' +
-      '<textarea class="zp-in" id="s-style" placeholder="">' + esc(cfg.style) + '</textarea>' +
-      '<div class="zp-note">Describe yourself like you would describe a friend. The more specific, the more it sounds like you.</div></div>';
-  }
-  var FAST = 'FAST', SLOW = 'SLOW';
-  function tTiming() {
-    var adv = cfg.tUi === 'advanced';
-    var h = '<div class="zp-card"><div class="zp-lbl">TIMING MODE</div><div class="zp-mode">' +
-      '<button class="zp-mc' + (!adv ? ' on' : '') + '" data-ui="classic">CLASSIC<small>pause min / max</small></button>' +
-      '<button class="zp-mc' + (adv ? ' on' : '') + '" data-ui="advanced">ADVANCED<small>FAST · SLOW · CUSTOM</small></button><span></span></div></div>';
-    if (!adv) {
-      return h + '<div class="zp-card"><div class="zp-lbl">CLASSIC</div>' +
-        row('Pause min (seconds)', 'wait between replies', num('t-paceMin', cfg.paceMin, 0)) +
-        row('Pause max (seconds)', '', num('t-paceMax', cfg.paceMax, 0)) + '</div>';
-    }
+  // ----- Timing (copy of the extension's Timing Hub, comment group = SEA + FED) -----
+  var P_FAST = { view: [1, 2], like: [1, 2], gen: [1, 2], post: [1, 2], next: [5, 7], target: null, breakEvery: 50, breakLen: [30, 50] };
+  var P_SLOW = { view: [3, 5], like: [3, 5], gen: [3, 5], post: [3, 5], next: [12, 18], target: null, breakEvery: 25, breakLen: [75, 125] };
+  var P_FLASH = { view: [0.1, 0.3], like: [0.1, 0.3], gen: [0.1, 0.3], post: [0.1, 0.3], next: [0.3, 0.8], target: null, breakEvery: 0, breakLen: [0, 0], flash: true };
+  var P_LITE = { view: [0.3, 0.8], like: [0.3, 0.8], gen: [0.2, 0.6], post: [0.2, 0.6], next: [0.8, 1.6], target: 12.5, breakEvery: 0, breakLen: [0, 0], flash: true, lite: true };
+  function clampN(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  function r1(v) { return Math.round(v * 10) / 10; }
+  function nn(v, d) { v = Number(v); return isFinite(v) ? v : d; }
+  function perItem() { return cfg.tMethod === 'total' ? Math.max(1, nn(cfg.tTotal, 1200) / Math.max(1, nn(cfg.tN, 50))) : Math.max(1, nn(cfg.tPer, 40)); }
+  function resolveT() {
     var m = cfg.tMode;
-    var sum = m === 'slow' ? 'Slow: 12–18 s between replies, small waits 3–5 s between steps, a 75–125 s break every 25 replies. Safest.'
-      : m === 'custom' ? 'Custom: about ' + (Number(cfg.tPer) || 40) + ' s per reply' + (Number(cfg.tBreakEvery) > 0 ? ', break ' + cfg.tBreakMin + '–' + cfg.tBreakMax + ' s every ' + cfg.tBreakEvery + ' replies.' : ', no breaks.')
-      : 'Fast: 5–7 s between replies, small waits 1–2 s between steps, a 30–50 s break every 50 replies.';
-    h += '<div class="zp-card"><div class="zp-lbl">ADVANCED</div><div class="zp-mode">' +
-      '<button class="zp-mc' + (m === 'fast' || (m !== 'slow' && m !== 'custom') ? ' on' : '') + '" data-mode="fast">FAST<small>5–7 s</small></button>' +
-      '<button class="zp-mc' + (m === 'slow' ? ' on' : '') + '" data-mode="slow">SLOW<small>12–18 s</small></button>' +
-      '<button class="zp-mc' + (m === 'custom' ? ' on' : '') + '" data-mode="custom">CUSTOM<small>your own</small></button></div>' +
-      '<div class="zp-note" id="t-sum">' + sum + '</div></div>';
-    if (m === 'custom') {
-      h += '<div class="zp-card"><div class="zp-lbl">CUSTOM</div>' +
-        row('Seconds per reply', 'whole cycle: steps + wait', num('t-tPer', cfg.tPer, 5)) +
-        row('Break every N replies', '0 = no breaks', num('t-tBreakEvery', cfg.tBreakEvery, 0)) +
-        row('Break min (seconds)', '', num('t-tBreakMin', cfg.tBreakMin, 0)) +
-        row('Break max (seconds)', '', num('t-tBreakMax', cfg.tBreakMax, 0)) +
-        (Number(cfg.tPer) < 15 ? '<div class="zp-note" style="color:#f59e0b">Under 15 s per reply is risky: X may limit the account. Suggested: 30 s.</div>' : '') + '</div>';
+    if (m === 'flash') return P_FLASH; if (m === 'flashlite') return P_LITE; if (m === 'slow') return P_SLOW;
+    if (m !== 'custom') return P_FAST;
+    var T = perItem(), s = clampN(T * 0.06, 1, 20), st = [r1(s * 0.7), r1(s * 1.3)], b1 = nn(cfg.tBreakMin, 0), b2 = nn(cfg.tBreakMax, 0);
+    return { view: st, like: st, gen: st, post: st, next: [Math.max(2, Math.round(T * 0.5)), Math.max(2, Math.round(T))], target: T,
+      breakEvery: Math.max(0, Math.floor(nn(cfg.tBreakEvery, 0))), breakLen: [Math.min(b1, b2), Math.max(b1, b2)] };
+  }
+  function fmtS(s) {
+    if (s < 10) return r1(s) + 's'; s = Math.round(s);
+    if (s < 60) return s + 's';
+    if (s < 3600) { var m = Math.floor(s / 60), x = s % 60; return m + 'm' + (x ? ' ' + x + 's' : ''); }
+    var h = Math.floor(s / 3600), mm = Math.round((s % 3600) / 60); if (mm === 60) { h++; mm = 0; }
+    return h + 'h' + (mm ? ' ' + mm + 'm' : '');
+  }
+  function rngS(r) { return r[0] === r[1] ? fmtS(r[0]) : fmtS(r[0]) + '–' + fmtS(r[1]); }
+  function tSummary() {
+    var r = resolveT(), L = [];
+    L.push('Like → comment ' + rngS(r.like)); L.push('After reply is generated ' + rngS(r.gen)); L.push('After clicking Reply ' + rngS(r.post));
+    if (r.target) L.push('Whole post takes about ' + fmtS(r.target)); else L.push('Before next post ' + rngS(r.next));
+    L.push(r.breakEvery > 0 ? 'Break every ' + r.breakEvery + ' replies · ' + rngS(r.breakLen) : 'No breaks');
+    if (cfg.tMode === 'flashlite') L.unshift('⚡ Flash Lite · human feel · about 15-20% slower than Flash');
+    if (cfg.tMode === 'custom') { var T = perItem(); L.unshift('≈ ' + fmtS(T) + ' per post · ≈ ' + (T >= 36 ? r1(3600 / T) : Math.round(3600 / T)) + '/hour'); }
+    return L.join('  ·  ');
+  }
+  function tWarn() {
+    var m = cfg.tMode;
+    if (m === 'flash') return '⚡ FLASH — every step, scroll and wait runs at max speed, no breaks. Fastest possible, but X may flag or limit the account. Use it carefully.';
+    if (m === 'flashlite') return '⚡ FLASH LITE — Flash-style speed (about 15-20% slower), with a calmer pace. No breaks. Safer than FLASH, still fast.';
+    if (m !== 'custom') return '';
+    var T = perItem(); if (T >= 15) return '';
+    return '⚠️ Very fast — ' + fmtS(T) + ' per post. X may flag or limit the account. Suggested: 30s per post (≈ 120/hour).';
+  }
+  function tLabel() {
+    if (cfg.tUi !== 'advanced') return 'CLASSIC · ' + (cfg.cSpeed === 'fast' ? 'Fast' : cfg.cSpeed === 'custom' ? 'Custom gap' : 'Normal');
+    return 'ADVANCED · ' + (cfg.tMode === 'flashlite' ? 'FLASH LITE' : String(cfg.tMode || 'fast').toUpperCase());
+  }
+  function vTiming() {
+    var adv = cfg.tUi === 'advanced';
+    var h = '<div class="zp-card"><div class="zp-lbl">TIMING SYSTEM</div>' + sg('ui', [['classic', 'CLASSIC'], ['advanced', 'ADVANCED']], adv ? 'advanced' : 'classic') +
+      '<div class="zp-note">' + (adv ? 'Advanced: FLASH · FLASH LITE · FAST · SLOW · CUSTOM for SEA and FED together. The Classic controls are hidden.' : 'Classic: Reply Speed + the like → comment delay, same as the extension\'s old controls.') + '</div></div>';
+    if (!adv) {
+      h += '<div class="zp-card"><div class="zp-lbl">REPLY SPEED</div>' +
+        '<select class="zp-in" id="c-speed"><option value="normal"' + (cfg.cSpeed === 'normal' ? ' selected' : '') + '>Normal — human-like pace</option>' +
+        '<option value="fast"' + (cfg.cSpeed === 'fast' ? ' selected' : '') + '>Fast — shorter gaps</option>' +
+        '<option value="custom"' + (cfg.cSpeed === 'custom' ? ' selected' : '') + '>Custom — set my own gap</option></select>' +
+        (cfg.cSpeed === 'custom' ? row('Gap (sec)', 'wait between replies', num('c-gap', cfg.cGap, 1)) : '') +
+        '<div class="zp-note">Normal ≈ 4–7 s, Fast ≈ 2–3.5 s between replies (always a little random).</div></div>' +
+        '<div class="zp-card"><div class="zp-lbl">COMMENT AFTER LIKE (SEC)</div>' +
+        '<div class="zp-row"><div class="l">Wait min – max<small>0 – 0 = comment right away</small></div>' + num('c-ldMin', cfg.ldMin, 0) + '<span class="zp-u">–</span>' + num('c-ldMax', cfg.ldMax, 0) + '</div></div>';
+      return h;
     }
+    var c = cfg.tMode === 'custom';
+    h += '<div class="zp-card"><div class="zp-title">COMMENT ENGINES</div><div class="zp-note" style="margin:2px 0 4px">SEA · FED replies</div>' +
+      sg('mode', [['flash', '⚡ FLASH'], ['flashlite', '⚡ FLASH LITE'], ['fast', 'FAST'], ['slow', 'SLOW'], ['custom', 'CUSTOM']], (['flash', 'flashlite', 'slow', 'custom'].indexOf(cfg.tMode) >= 0 ? cfg.tMode : 'fast')) +
+      '<div class="zp-note" id="t-sum">' + esc(tSummary()) + '</div>';
+    if (c) {
+      var per = Math.max(1, nn(cfg.tPer, 40)), tot = Math.max(60, nn(cfg.tTotal, 1200));
+      h += sg('method', [['per', 'Per post'], ['total', 'Total time']], cfg.tMethod === 'total' ? 'total' : 'per');
+      if (cfg.tMethod !== 'total') {
+        h += '<div class="zp-row"><div class="l">Time per post</div><input class="zp-in sm2" data-f="perM" type="number" min="0" value="' + Math.floor(per / 60) + '"><span class="zp-u">m</span><input class="zp-in sm2" data-f="perS" type="number" min="0" value="' + (per % 60) + '"><span class="zp-u">s</span></div>';
+      } else {
+        h += '<div class="zp-row"><div class="l">Posts</div><input class="zp-in sm2" data-f="n" type="number" min="1" value="' + Math.max(1, nn(cfg.tN, 50)) + '"></div>' +
+          '<div class="zp-row"><div class="l">Finish in</div><input class="zp-in sm2" data-f="totH" type="number" min="0" value="' + Math.floor(tot / 3600) + '"><span class="zp-u">h</span><input class="zp-in sm2" data-f="totM" type="number" min="0" value="' + Math.round((tot % 3600) / 60) + '"><span class="zp-u">m</span></div>';
+      }
+      h += '<div class="zp-row"><div class="l">Break every<small>posts (0 = none)</small></div><input class="zp-in sm2" data-f="breakEvery" type="number" min="0" value="' + nn(cfg.tBreakEvery, 0) + '"></div>' +
+        '<div class="zp-row"><div class="l">Break length (sec)</div><input class="zp-in sm2" data-f="bMin" type="number" min="0" value="' + nn(cfg.tBreakMin, 0) + '"><span class="zp-u">–</span><input class="zp-in sm2" data-f="bMax" type="number" min="0" value="' + nn(cfg.tBreakMax, 0) + '"></div>';
+    }
+    h += '<div class="zp-warn" id="t-warn"' + (tWarn() ? '' : ' style="display:none"') + '>' + esc(tWarn()) + '</div></div>';
     return h;
   }
-  function tFilters() {
-    return '<div class="zp-card"><div class="zp-lbl">FED FILTER</div>' +
-      row('Target filter', 'only posts containing these words', sw('f-target', cfg.target)) +
-      row('Target words', 'a, b, c', '<input class="zp-in" id="f-targetKw" style="width:150px" value="' + esc(cfg.targetKw) + '">') + '</div>' +
-      '<div class="zp-card"><div class="zp-lbl">SEA AGE LIMIT</div>' +
-      row('Age limit', '', sw('f-ageOn', cfg.ageOn)) +
-      row('Post age min (minutes)', '', num('f-ageMinMin', cfg.ageMinMin, 0)) +
-      row('Post age max (minutes)', '', num('f-ageMaxMin', cfg.ageMaxMin, 1)) + '</div>' +
-      '<div class="zp-card"><div class="zp-lbl">ACCOUNT</div>' +
-      row('My @handle', 'optional, detected automatically. Own posts are always skipped.', '<input class="zp-in" id="f-myHandle" style="width:150px" value="' + esc(cfg.myHandle) + '">') + '</div>' +
+  function refreshT() {
+    var s = $('t-sum'); if (s) s.textContent = tSummary();
+    var w = $('t-warn'); if (w) { var t = tWarn(); w.textContent = t; w.style.display = t ? 'block' : 'none'; }
+  }
+  function timingNote() { return '<div class="zp-tnote" data-go="timing">⏱ <b>Timing: ' + esc(tLabel()) + '</b> — set in the Timing page. Tap to open ›</div>'; }
+
+  // ----- shared cards for FED + SEA -----
+  function likeCard(p) {
+    return '<div class="zp-card"><div class="zp-lbl">LIKE POSTS</div>' + row('Like posts', 'like the post before replying', sw(p + '-like', cfg[p + 'Like'])) +
+      row('Random like %', '100 = every post', num(p + '-likePct', cfg[p + 'LikePct'], 0)) + '</div>';
+  }
+  function limitCard(p) {
+    return '<div class="zp-card"><div class="zp-lbl">AUTO-STOP LIMIT</div>' + row('Stop after', 'replies in one run', num(p + '-max', cfg[p + 'Max'], 1)) +
+      row('Reply keyword', 'used naturally in the reply (optional)', '<input class="zp-in" id="' + p + '-kw" style="width:140px" value="' + esc(cfg[p + 'Keyword']) + '">') + '</div>';
+  }
+  function es2Card(p, name) {
+    return '<div class="zp-card"><div class="zp-lbl">EXTRA SAFETY 2</div>' +
+      row('Open the post first', 'Sometimes (by %) the ' + name + ' engine taps the post, opens its page, replies from there, then goes back — like a real person. Works in AUTO.', sw(p + '-es2', cfg[p + 'Es2'])) +
+      row('Chance %', 'how often the post is opened first', num(p + '-es2pct', cfg[p + 'Es2Pct'], 0)) + '</div>';
+  }
+
+  // ----- FED -----
+  function vFed() {
+    return '<div class="zp-card"><div class="zp-lbl">FEED ENGINE</div>' + row('FED Engine', 'reply buttons on x.com/home posts', sw('e-fed', cfg.fed)) + '</div>' +
+      '<div class="zp-card"><div class="zp-row"><div class="l">GO TO X<small>open your home feed in the X tab</small></div><button type="button" class="zp-chip gold" data-act="gofed">GO TO X</button></div>' +
+      '<div class="zp-note">Start / Stop = the floating <b>Z</b> button inside X.</div></div>' +
+      '<div class="zp-card"><div class="zp-lbl">TARGET POST FILTER</div>' + row('Enable filter', 'only posts containing these words', sw('f-target', cfg.target)) +
+      row('Target words', 'a, b, c (any one matches)', '<input class="zp-in" id="f-targetKw" style="width:150px" value="' + esc(cfg.targetKw) + '">') + '</div>' +
+      likeCard('fed') + limitCard('fed') + timingNote() + es2Card('fed', 'FED') +
       '<div class="zp-note">Comments (replies), ads and your own posts are always skipped.</div>';
   }
-  var TABS = [['run', 'RUN'], ['tone', 'TONE'], ['timing', 'TIMING'], ['filters', 'FILTERS']];
+
+  // ----- SEA -----
+  var WITHIN = [['', 'Any time'], ['30min', '30 min'], ['60min', '1 hour'], ['6h', '6 hours'], ['24h', '24 hours'], ['7d', '7 days']];
+  function activeQ() { for (var i = 0; i < cfg.seaQs.length; i++) if (cfg.seaQs[i].id === cfg.seaQActive) return cfg.seaQs[i]; return null; }
+  function qName(q) { return q.name || 'Query ' + (cfg.seaQs.indexOf(q) + 1); }
+  function seaBuild() {   // same rules as the extension's buildSehSearchUrl; a custom query is used exactly as written
+    var aq = activeQ(), raw = aq ? String(aq.text || '').replace(/\s+/g, ' ').trim() : '', live = cfg.seaRes === 'latest' ? '&f=live' : '';
+    if (aq && !raw) return { err: 'Custom query is ON but empty' };
+    if (raw) return { url: 'https://x.com/search?q=' + encodeURIComponent(raw) + '&src=typed_query' + live, q: raw, raw: true };
+    var kws = cfg.seaKw, parts = [];
+    if (!kws.length) return { err: 'Add at least one keyword, or turn on a custom query' };
+    parts.push(kws.length > 1 ? '(' + kws.map(function (k) { return /\s/.test(k) ? '"' + k + '"' : k; }).join(' OR ') + ')' : (/\s/.test(kws[0]) ? '"' + kws[0] + '"' : kws[0]));
+    if (cfg.seaFMedia) parts.push('filter:media'); if (cfg.seaFReplies) parts.push('filter:replies'); if (cfg.seaFVerified) parts.push('filter:blue_verified');
+    if (cfg.seaFLinks) parts.push('filter:links'); if (cfg.seaFRt) parts.push('filter:retweets');
+    if (cfg.seaMinRep) parts.push('min_replies:' + cfg.seaMinRep); if (cfg.seaMinFav) parts.push('min_faves:' + cfg.seaMinFav);
+    if (cfg.seaLang) parts.push('lang:' + cfg.seaLang); if (cfg.seaWithin) parts.push('within_time:' + cfg.seaWithin);
+    var q = parts.join(' ');
+    return { url: 'https://x.com/search?q=' + encodeURIComponent(q) + '&src=typed_query' + live, q: q };
+  }
+  function saveSea(p) {   // save + rebuild the search URL the floating Z button can open
+    for (var k in p) cfg[k] = p[k];
+    var b = seaBuild(); p.seaUrl = b.url || ''; cfg.seaUrl = p.seaUrl;
+    save(p); paintSea();
+  }
+  function paintSea() {
+    var st = $('q-status'); if (st) { var a = activeQ(); st.textContent = a ? 'ON: ' + qName(a) : 'All OFF — keywords & filters are used'; }
+    var pv = $('s-prev'); if (pv) { var b = seaBuild(); pv.textContent = b.err ? b.err : b.q; pv.style.color = b.err ? '#f87171' : ''; }
+  }
+  function selHtml(id, opts, cur) { return '<select class="zp-in" id="' + id + '" style="width:auto;min-width:96px">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (String(cur) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>'; }
+  function vSea() {
+    var tags = cfg.seaKw.map(function (k, i) { return '<span class="zp-tag">' + esc(k) + '<button type="button" data-kwdel="' + i + '">×</button></span>'; }).join('');
+    return '<div class="zp-card"><div class="zp-lbl">SEA ENGINE</div>' + row('SEA Engine', 'reply buttons on x.com/search posts', sw('e-sea', cfg.sea)) + '</div>' +
+      '<div class="zp-card"><div class="zp-lbl">SEARCH KEYWORDS</div>' +
+      '<div style="display:flex;gap:8px"><input class="zp-in" id="s-kwin" placeholder="Add a keyword..." autocomplete="off" autocapitalize="off"><button type="button" class="zp-chip gold" id="s-kwadd">Add</button></div>' +
+      '<div class="zp-tags" id="s-tags">' + tags + '</div><div class="zp-note">Several keywords = one search with OR between them.</div></div>' +
+      '<div class="zp-card"><div class="zp-lbl">CUSTOM QUERY (RAW)</div><div id="q-list"></div>' +
+      '<button type="button" class="zp-btn ghost" id="q-add" style="margin-top:6px">+ Add query</button>' +
+      '<div class="zp-note" id="q-status"></div>' +
+      '<div class="zp-note">Got your own X search query? Paste it and it runs exactly as written. While one is ON, the keywords and filters below are ignored (Top / Latest still applies).</div></div>' +
+      '<div class="zp-card"><div class="zp-lbl">SEARCH FILTERS</div>' +
+      row('Results', '', selHtml('s-res', [['top', 'Top'], ['latest', 'Latest']], cfg.seaRes)) +
+      row('Media only', 'filter:media', sw('s-fmedia', cfg.seaFMedia)) + row('Replies', 'filter:replies', sw('s-freplies', cfg.seaFReplies)) +
+      row('Verified only', 'filter:blue_verified', sw('s-fverified', cfg.seaFVerified)) + row('Has links', 'filter:links', sw('s-flinks', cfg.seaFLinks)) +
+      row('Retweets', 'filter:retweets', sw('s-frt', cfg.seaFRt)) +
+      row('Min replies', 'min_replies', selHtml('s-minrep', [['', 'Off'], ['10', '10+'], ['20', '20+']], cfg.seaMinRep)) +
+      row('Min likes', 'min_faves', selHtml('s-minfav', [['', 'Off'], ['10', '10+'], ['50', '50+'], ['100', '100+']], cfg.seaMinFav)) +
+      row('Language', 'lang', selHtml('s-lang', [['', 'Any'], ['en', 'English']], cfg.seaLang)) +
+      row('Posted within', 'within_time', selHtml('s-within', WITHIN, cfg.seaWithin)) + '</div>' +
+      '<div class="zp-card"><div class="zp-lbl">SEARCH THAT WILL OPEN</div><div class="zp-code" id="s-prev"></div>' +
+      '<button type="button" class="zp-btn" id="s-go" style="margin-top:8px">GO TO SEARCH</button>' +
+      '<div class="zp-note">Opens it in the X tab. Then tap the floating <b>Z</b> button there to START.</div></div>' +
+      likeCard('sea') +
+      '<div class="zp-card"><div class="zp-lbl">POST AGE LIMIT</div>' + row('Enable', 'skip posts outside the age window', sw('f-ageOn', cfg.ageOn)) +
+      row('Newest (minutes)', 'younger than this is skipped', num('f-ageMinMin', cfg.ageMinMin, 0)) + row('Oldest (minutes)', 'older than this stops the run', num('f-ageMaxMin', cfg.ageMaxMin, 1)) + '</div>' +
+      limitCard('sea') + timingNote() + es2Card('sea', 'SEA') +
+      '<div class="zp-note">Comments (replies), ads and your own posts are always skipped.</div>';
+  }
+  function renderQs() {
+    var host = $('q-list'); if (!host) return;
+    host.textContent = '';
+    cfg.seaQs.slice(0, qShown).forEach(function (q, i) {
+      var on = q.id === cfg.seaQActive;
+      var box = document.createElement('div'); box.className = 'zp-qbox' + (on ? ' on' : '');
+      var top = document.createElement('div'); top.className = 'zp-qtop';
+      var name = document.createElement('input'); name.className = 'zp-in'; name.placeholder = 'Query ' + (i + 1) + ' (name)'; name.value = q.name || '';
+      name.oninput = function () { q.name = name.value; saveSea({ seaQs: cfg.seaQs }); };
+      var lab = document.createElement('label'); lab.className = 'zp-sw';
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = on; var ii = document.createElement('i'); lab.appendChild(cb); lab.appendChild(ii);
+      cb.onchange = function () { saveSea({ seaQActive: cb.checked ? q.id : '' }); renderQs(); };
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'zp-x'; del.textContent = '✕';
+      del.onclick = function () {
+        if (!confirm('Delete this query?')) return;
+        cfg.seaQs = cfg.seaQs.filter(function (x) { return x.id !== q.id; });
+        saveSea({ seaQs: cfg.seaQs, seaQActive: cfg.seaQActive === q.id ? '' : cfg.seaQActive }); renderQs();
+      };
+      top.appendChild(name); top.appendChild(lab); top.appendChild(del);
+      var ta = document.createElement('textarea'); ta.className = 'zp-in zp-mono'; ta.rows = 3; ta.spellcheck = false; ta.value = q.text || '';
+      ta.placeholder = 'filter:blue_verified ("ProjectName" OR @handle) -filter:replies min_replies:20 lang:en within_time:1440min';
+      ta.oninput = function () { q.text = ta.value; saveSea({ seaQs: cfg.seaQs }); };
+      box.appendChild(top); box.appendChild(ta); host.appendChild(box);
+    });
+    if (cfg.seaQs.length > qShown) {
+      var more = document.createElement('button'); more.type = 'button'; more.className = 'zp-btn ghost'; more.style.marginBottom = '8px';
+      more.textContent = 'Load more (' + (cfg.seaQs.length - qShown) + ')'; more.onclick = function () { qShown = cfg.seaQs.length; renderQs(); };
+      host.appendChild(more);
+    }
+    paintSea();
+  }
+
+  // ----- home (agent list) -----
+  function agentCard(go, title, sub, badge) {
+    return '<button type="button" class="zp-ag" data-go="' + go + '"><span class="ic">' + IC[go] + '</span><span class="tx"><b>' + title + '</b><small>' + sub + '</small></span>' +
+      (badge ? '<span class="zp-badge' + (badge === 'ON' ? ' on' : '') + '">' + badge + '</span>' : '') + '<span class="ar">›</span></button>';
+  }
+  function vHome() {
+    return '<div class="zp-hero"><div class="t">Yo, it\'s me your time saviour</div><div class="s">Choose one of the engines to do your work</div></div>' +
+      agentCard('timing', 'Timing', 'Speed &amp; delays for every engine, in one place', tLabel().split(' · ')[0]) +
+      agentCard('fed', 'FED Engine', 'Reply to posts on your home feed', cfg.fed ? 'ON' : 'OFF') +
+      agentCard('sea', 'Search Engine', 'Search a keyword, reply to the results', cfg.sea ? 'ON' : 'OFF') +
+      '<div class="zp-card" style="margin-top:14px"><div class="zp-lbl">ACCOUNT</div>' +
+      row('My @handle', 'optional, detected automatically. Own posts are always skipped.', '<input class="zp-in" id="f-myHandle" style="width:140px" value="' + esc(cfg.myHandle) + '">') + '</div>' +
+      '<div class="zp-note">Start / Stop is the floating <b>Z</b> button inside X. Tone, grammar, big reply and style are in the Settings sheet.</div>';
+  }
   function render() {
     var el = $('engine-screen'); if (!el) return;
     loadCfg();
-    var body = tab === 'tone' ? tTone() : tab === 'timing' ? tTiming() : tab === 'filters' ? tFilters() : tRun();
-    el.innerHTML = '<div class="zp-wrap"><div class="zp-h">Engine</div><div class="zp-sub">SEA + FED · part of Z1 · keys & profile are in Menu → Profile</div>' +
-      '<div class="zp-tabs">' + TABS.map(function (t) { return '<button class="zp-tab' + (tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' + body + '</div>';
+    var body = view === 'timing' ? vTiming() : view === 'fed' ? vFed() : view === 'sea' ? vSea() : vHome();
+    el.innerHTML = '<div class="zp-wrap">' + (view === 'home' ? '<div class="zp-h">Engine</div><div class="zp-sub">FED · SEA · Timing — keys &amp; profile are in Menu → Profile</div>' : '') + body + '</div>';
     wire(el);
+    if (view === 'sea') renderQs();
   }
-  function bindCheck(el, id, key) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.checked; save(p); }; }
-  function bindNum(el, id, key) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var v = Number(e.value); if (!isFinite(v)) return; var p = {}; p[key] = v; save(p); if (tab === 'timing') render(); }; }
+  function bindCheck(el, id, key, after) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.checked; save(p); if (after) after(); }; }
+  function bindNum(el, id, key, after) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var v = Number(e.value); if (!isFinite(v)) return; var p = {}; p[key] = v; save(p); if (after) after(); }; }
   function bindTxt(el, id, key) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.value.trim(); save(p); }; }
+  function bindSel(el, id, key, sea) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.value; if (sea) saveSea(p); else save(p); }; }
+  function bindSeaCheck(el, id, key) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.checked; saveSea(p); }; }
   function wire(el) {
-    [].forEach.call(el.querySelectorAll('[data-tab]'), function (b) { b.onclick = function () { tab = b.getAttribute('data-tab'); render(); }; });
-    bindCheck(el, 'e-sea', 'sea'); bindCheck(el, 'e-fed', 'fed'); bindCheck(el, 'e-like', 'like');
-    bindNum(el, 'e-maxRun', 'maxRun'); bindNum(el, 'e-likePct', 'likePct'); bindTxt(el, 'e-keyword', 'keyword');
-    [].forEach.call(el.querySelectorAll('[data-tone]'), function (b) {
-      b.onclick = function () { save({ tone: b.getAttribute('data-tone') }); render(); };
+    [].forEach.call(el.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { view = b.getAttribute('data-go'); render(); toTop(el); }; });
+    // timing
+    [].forEach.call(el.querySelectorAll('[data-act]'), function (b) {
+      b.onclick = function () {
+        var a = b.getAttribute('data-act'), v = b.getAttribute('data-v');
+        if (a === 'ui') { save({ tUi: v }); render(); }
+        else if (a === 'mode') { save({ tMode: v }); render(); }
+        else if (a === 'method') { save({ tMethod: v }); render(); }
+        else if (a === 'gofed') goX('https://x.com/home');
+      };
     });
-    var fold = el.querySelector('#g-fold');
-    if (fold) fold.onclick = function () { var l = $('g-list'), o = l.style.display === 'none'; l.style.display = o ? 'block' : 'none'; $('g-arrow').textContent = o ? '▲' : '▼'; };
-    GRAM.forEach(function (t) {
-      var e = el.querySelector('#g-' + t);
-      if (e) e.onchange = function () { var g = {}; for (var k in cfg.grammar) g[k] = cfg.grammar[k]; g[t] = e.checked; save({ grammar: g }); };
+    var cs = el.querySelector('#c-speed'); if (cs) cs.onchange = function () { save({ cSpeed: cs.value }); render(); };
+    bindNum(el, 'c-gap', 'cGap'); bindNum(el, 'c-ldMin', 'ldMin'); bindNum(el, 'c-ldMax', 'ldMax');
+    [].forEach.call(el.querySelectorAll('[data-f]'), function (i) {
+      i.oninput = function () {
+        var q = function (f) { var x = el.querySelector('[data-f="' + f + '"]'); var n = x ? parseInt(x.value, 10) : 0; return isFinite(n) && n >= 0 ? n : 0; };
+        var f = i.getAttribute('data-f'), p = {};
+        if (f === 'perM' || f === 'perS') p.tPer = Math.max(1, q('perM') * 60 + q('perS'));
+        else if (f === 'n') p.tN = Math.max(1, q('n'));
+        else if (f === 'totH' || f === 'totM') p.tTotal = Math.max(60, q('totH') * 3600 + q('totM') * 60);
+        else if (f === 'breakEvery') p.tBreakEvery = q('breakEvery');
+        else if (f === 'bMin') p.tBreakMin = q('bMin');
+        else if (f === 'bMax') p.tBreakMax = q('bMax');
+        save(p); refreshT();
+      };
     });
-    bindCheck(el, 'b-on', 'bigOn'); bindTxt(el, 'b-words', 'bigWords');
-    var bt = el.querySelector('#b-tone'); if (bt) bt.onchange = function () { save({ bigTone: bt.value }); };
-    var br = el.querySelector('#b-reset'); if (br) br.onclick = function () { save({ bigOn: false, bigWords: '', bigTone: 'Smart' }); render(); say('Big Reply reset'); };
-    bindTxt(el, 'c-words', 'customWords');
-    var cp = el.querySelector('#c-prompt'); if (cp) cp.onchange = function () { save({ customTone: cp.value.trim() }); };
-    var st = el.querySelector('#s-style'); if (st) st.onchange = function () { save({ style: st.value.trim() }); };
-    [].forEach.call(el.querySelectorAll('[data-ui]'), function (b) { b.onclick = function () { save({ tUi: b.getAttribute('data-ui') }); render(); }; });
-    [].forEach.call(el.querySelectorAll('[data-mode]'), function (b) { b.onclick = function () { save({ tMode: b.getAttribute('data-mode') }); render(); }; });
-    bindNum(el, 't-paceMin', 'paceMin'); bindNum(el, 't-paceMax', 'paceMax');
-    bindNum(el, 't-tPer', 'tPer'); bindNum(el, 't-tBreakEvery', 'tBreakEvery'); bindNum(el, 't-tBreakMin', 'tBreakMin'); bindNum(el, 't-tBreakMax', 'tBreakMax');
-    bindCheck(el, 'f-target', 'target'); bindTxt(el, 'f-targetKw', 'targetKw'); bindCheck(el, 'f-ageOn', 'ageOn');
-    bindNum(el, 'f-ageMinMin', 'ageMinMin'); bindNum(el, 'f-ageMaxMin', 'ageMaxMin'); bindTxt(el, 'f-myHandle', 'myHandle');
+    // engines + shared cards
+    bindCheck(el, 'e-fed', 'fed', function () { /* badge refreshes next time the list opens */ });
+    bindCheck(el, 'e-sea', 'sea');
+    ['sea', 'fed'].forEach(function (p) {
+      bindCheck(el, p + '-like', p + 'Like'); bindNum(el, p + '-likePct', p + 'LikePct'); bindNum(el, p + '-max', p + 'Max');
+      bindTxt(el, p + '-kw', p + 'Keyword'); bindCheck(el, p + '-es2', p + 'Es2'); bindNum(el, p + '-es2pct', p + 'Es2Pct');
+    });
+    bindCheck(el, 'f-target', 'target'); bindTxt(el, 'f-targetKw', 'targetKw'); bindTxt(el, 'f-myHandle', 'myHandle');
+    bindCheck(el, 'f-ageOn', 'ageOn'); bindNum(el, 'f-ageMinMin', 'ageMinMin'); bindNum(el, 'f-ageMaxMin', 'ageMaxMin');
+    // SEA
+    bindSel(el, 's-res', 'seaRes', true); bindSel(el, 's-minrep', 'seaMinRep', true); bindSel(el, 's-minfav', 'seaMinFav', true);
+    bindSel(el, 's-lang', 'seaLang', true); bindSel(el, 's-within', 'seaWithin', true);
+    bindSeaCheck(el, 's-fmedia', 'seaFMedia'); bindSeaCheck(el, 's-freplies', 'seaFReplies'); bindSeaCheck(el, 's-fverified', 'seaFVerified');
+    bindSeaCheck(el, 's-flinks', 'seaFLinks'); bindSeaCheck(el, 's-frt', 'seaFRt');
+    var kwin = el.querySelector('#s-kwin'), kwadd = el.querySelector('#s-kwadd');
+    function addKw() {
+      var v = (kwin.value || '').trim().replace(/\s+/g, ' '); if (!v) return;
+      if (cfg.seaKw.some(function (k) { return k.toLowerCase() === v.toLowerCase(); })) { kwin.value = ''; return; }
+      saveSea({ seaKw: cfg.seaKw.concat([v]) }); render();
+    }
+    if (kwadd) { kwadd.onclick = addKw; kwin.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); addKw(); } }; }
+    [].forEach.call(el.querySelectorAll('[data-kwdel]'), function (b) {
+      b.onclick = function () { var i = Number(b.getAttribute('data-kwdel')); saveSea({ seaKw: cfg.seaKw.filter(function (_, j) { return j !== i; }) }); render(); };
+    });
+    var qa = el.querySelector('#q-add');
+    if (qa) qa.onclick = function () { cfg.seaQs.push({ id: 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: '', text: '' }); qShown = Math.max(qShown, cfg.seaQs.length); saveSea({ seaQs: cfg.seaQs }); renderQs(); };
+    var go = el.querySelector('#s-go');
+    if (go) go.onclick = function () { var b = seaBuild(); if (b.err) { say(b.err, 'error'); return; } goX(b.url); };
   }
+  function toTop(el) { try { el.scrollTop = 0; if (el.parentNode) el.parentNode.scrollTop = 0; window.scrollTo(0, 0); } catch (e) {} }
   function mountEngine() {
     if ($('engine-screen')) return;
     var host = $('upload-screen') ? $('upload-screen').parentNode : $('app');
     var d = document.createElement('div'); d.className = 'screen'; d.id = 'engine-screen';
     host.appendChild(d);
   }
+  // header pill for the Engine screen (z1-ui.js asks): "Home" on the list, "Engine" on a sub screen
+  window.zlEngNav = function () {
+    if (view === 'home') return { back: 'Home', title: 'Engine', fn: null };
+    return { back: 'Engine', title: VIEW_TITLE[view] || 'Engine', fn: function () { view = 'home'; render(); toTop($('engine-screen')); } };
+  };
   window.zlGo = function (name) {
-    if (name === 'engine') { mountEngine(); try { closeMainMenu(); } catch (e) {} showScreen('engine'); render(); }
+    if (name === 'engine') {
+      mountEngine(); try { closeMainMenu(); } catch (e) {}
+      var el = $('engine-screen'), was = el && el.classList.contains('active');
+      if (!was) view = 'home';   // entering from the menu / Home = start on the engine list; refreshes keep the open sub screen
+      showScreen('engine'); render();
+    }
     else if (name === 'profile') openProfile();
   };
 
@@ -17421,7 +17642,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
     var anchor = $('api-btn') || $('settings-btn');
     if (!anchor || !anchor.parentNode) return;
     var it = document.createElement('div'); it.className = 'mmenu-item'; it.id = 'mmenu-engine';
-    it.innerHTML = '<div class="mmenu-icon" style="display:flex;align-items:center;justify-content:center;font:800 13px Space Mono,monospace;color:#a78bfa">EN</div><div class="mmenu-text"><div class="mmenu-label">Engine</div><div class="mmenu-sub">SEA · FED · tone · timing</div></div>';
+    it.innerHTML = '<div class="mmenu-icon" style="display:flex;align-items:center;justify-content:center;font:800 13px Space Mono,monospace;color:#a78bfa">EN</div><div class="mmenu-text"><div class="mmenu-label">Engine</div><div class="mmenu-sub">FED · SEA · timing</div></div>';
     it.onclick = function () { zlGo('engine'); };
     anchor.parentNode.insertBefore(it, anchor);
   }
