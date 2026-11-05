@@ -322,7 +322,7 @@
     root.innerHTML = '<div class="zp-wrap" style="padding-bottom:20px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center"><div class="zp-h">History</div><button class="zp-chip" id="hs-clear">Clear all</button></div>' +
       '<div class="zp-sub">' + list.length + ' events' + (list.length > shown.length ? ' · latest ' + shown.length + ' shown' : '') + (errs ? ' · ' + errs + ' errors in total' : '') + '</div>' + seg +
-      chips('eng', [['all', 'All'], ['SEA', 'SEA'], ['FED', 'FED']], hf.eng) +
+      chips('eng', [['all', 'All'], ['SEA', 'SEA'], ['FED', 'FED'], ['TG', 'TG']], hf.eng) +
       chips('day', [['all', 'All time'], ['today', 'Today'], ['7', '7 days']], hf.day) +
       chips('st', [['all', 'All'], ['reply', 'Posted'], ['draft', 'Draft'], ['skip', 'Skipped'], ['error', 'Errors']], hf.st) +
       '<div class="zp-card">' + (shown.length ? shown.map(evHtml).join('') : '<div class="zp-note" style="margin:0">No events for this filter.</div>') + '</div></div>';
@@ -649,7 +649,9 @@
       tone: TONES.indexOf(c.tone) >= 0 ? c.tone : 'Smart', style: c.style || '',
       grammar: (c.grammar && typeof c.grammar === 'object') ? c.grammar : {},
       bigOn: !!c.bigOn, bigWords: c.bigWords || '', bigTone: BIGT.indexOf(c.bigTone) >= 0 ? c.bigTone : 'Smart',
-      customTone: c.customTone || '', customWords: c.customWords || ''
+      customTone: c.customTone || '', customWords: c.customWords || '',
+      kwAuto: c.kwAuto !== false, kwCustomOn: c.kwCustomOn !== false, kwCustom: c.kwCustom || '', kwMode: c.kwMode === 'custom' ? 'custom' : 'both',
+      blackList: Array.isArray(c.blackList) ? c.blackList : [], whiteList: Array.isArray(c.whiteList) ? c.whiteList : []
     };
   }
   function save(p) {
@@ -658,6 +660,52 @@
   }
   var INP = 'width:100%;margin-top:6px;background:var(--s2);border:1.5px solid var(--border2);border-radius:12px;padding:10px 12px;color:var(--text);font-size:13px;font-family:inherit;box-sizing:border-box;outline:none;';
   function tog(id, on) { return '<label class="toggle-switch"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '><span class="toggle-slider"></span></label>'; }
+  /* Keyword Reply + Blacklist (ported from the Z EX extension's Keywords tab). The engine (assets/scripts/x.js) reads kwAuto / kwCustomOn / kwCustom / kwMode / blackList.
+     BUILTIN_KW must stay the same list as BUILTIN_KW in x.js. */
+  var BUILTIN_KW = ['gm', 'gn', 'hhm', 'gmm', 'gnnn', 'gmmm', 'happy mutant monday', 'happy mutant', 'good morning', 'good night', 'morning', 'night'];
+  function parseHandles(v) {
+    var out = [], seen = {};
+    String(v || '').split(/[\s,]+/).forEach(function (t) {
+      t = t.trim(); if (!t) return;
+      var m = /(?:x\.com|twitter\.com)\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/i.exec(t);
+      var h = (m ? m[1] : t).replace(/^@/, '').toLowerCase();
+      if (/^[a-z0-9_]{1,15}$/.test(h) && !seen[h] && ['i', 'home', 'search', 'explore', 'intent', 'compose', 'notifications', 'messages'].indexOf(h) < 0) { seen[h] = 1; out.push(h); }
+    });
+    return out;
+  }
+  function customCount(v) { return String(v || '').split(/[,\n]/).map(function (k) { return k.trim(); }).filter(Boolean).length; }
+  function kwBlock() {
+    var pills = BUILTIN_KW.map(function (k) { return '<span style="display:inline-block;margin:0 5px 5px 0;padding:4px 9px;border-radius:999px;border:1px solid var(--border2);background:var(--s2);color:var(--accent2);font-size:11px;font-weight:600;">' + esc(k) + '</span>'; }).join('');
+    var HINT = 'font-size:10px;color:#facc15;margin:4px 0 8px;line-height:1.5;';
+    var modeBtn = function (v, label) { return '<div class="tone-chip' + (cfg.kwMode === v ? ' active' : '') + '" data-kwmode="' + v + '" style="text-align:left;padding:10px 12px;">' + (cfg.kwMode === v ? '● ' : '○ ') + label + '</div>'; };
+    return '<div class="setting-block"><span class="field-label">// KEYWORD REPLY</span>' +
+      '<div style="' + HINT + '">Short posts like “GM guys” get a short human-style reply (like “Gm broski”) instead of a long AI response.</div>' +
+      '<div class="toggle-row"><div><div class="toggle-label">Auto Keywords</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Built-in list — Gm / Gn / HHM and more</div></div>' + tog('zs-kwauto', cfg.kwAuto) + '</div>' +
+      '<div id="zs-kwpills" style="margin-top:8px;">' + pills + '</div>' +
+      '<div id="zs-kwpillnote" style="font-size:10px;color:var(--muted);margin-bottom:10px;"></div>' +
+      '<div class="toggle-row"><div><div class="toggle-label">Custom Keywords</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Your own words for short posts</div></div>' + tog('zs-kwcon', cfg.kwCustomOn) + '</div>' +
+      '<textarea id="zs-kwcustom" rows="2" placeholder="gm, gn, hhm, happy mutant, gmm&#10;Separate with commas." style="' + INP + 'resize:vertical;">' + esc(cfg.kwCustom) + '</textarea>' +
+      '<div style="' + HINT + '">Post has one of these words? It gets a short, friendly reply.</div>' +
+      '<div id="zs-kwmode" style="display:none;"><span class="field-label">// WHICH KEYWORDS TO USE</span>' +
+      '<div style="display:grid;gap:6px;">' + modeBtn('both', 'Use your custom keywords + built-in keywords') + modeBtn('custom', 'Use only your custom keywords') + '</div></div></div>' +
+
+      '<div class="setting-block"><span class="field-label">// BLACKLIST</span>' +
+      '<div style="' + HINT + '">These accounts are never commented on (SEA + FED, manual and auto). One @handle per line, or paste profile links.</div>' +
+      '<textarea id="zs-bl" rows="4" placeholder="@account1&#10;@account2" style="' + INP + 'resize:vertical;">' + esc(cfg.blackList.map(function (h) { return '@' + h; }).join('\n')) + '</textarea>' +
+      '<div id="zs-blst" style="font-size:10px;color:var(--muted);margin-top:6px;">' + (cfg.blackList.length ? cfg.blackList.length + ' blacklisted' : '') + '</div></div>' +
+
+      '<div class="setting-block"><span class="field-label">// WHITELIST</span>' +
+      '<div style="' + HINT + '">Telegram Sweep opens links of these accounts first. (Works for links that contain the username, like x.com/name/status/…)</div>' +
+      '<textarea id="zs-wl" rows="3" placeholder="@vipaccount" style="' + INP + 'resize:vertical;">' + esc(cfg.whiteList.map(function (h) { return '@' + h; }).join('\n')) + '</textarea>' +
+      '<div id="zs-wlst" style="font-size:10px;color:var(--muted);margin-top:6px;">' + (cfg.whiteList.length ? cfg.whiteList.length + ' whitelisted' : '') + '</div></div>';
+  }
+  function kwRefresh(el) {   // live: mode picker only appears once custom keywords exist; built-in pills dim when they are not used
+    var on = el.querySelector('#zs-kwcon').checked, n = customCount(el.querySelector('#zs-kwcustom').value);
+    el.querySelector('#zs-kwmode').style.display = (on && n > 0) ? 'block' : 'none';
+    var auto = el.querySelector('#zs-kwauto').checked, only = on && n > 0 && cfg.kwMode === 'custom', used = auto && !only;
+    el.querySelector('#zs-kwpills').style.opacity = used ? '1' : '.4';
+    el.querySelector('#zs-kwpillnote').textContent = used ? '' : (!auto ? 'Built-in keywords are OFF.' : 'Built-in keywords are not used — “Only your custom keywords” is selected.');
+  }
   function render() {
     var el = $('zl-set-engine'); if (!el) return;
     load();
@@ -685,8 +733,9 @@
       '<div class="tone-chip" id="zs-breset" style="margin-top:8px;">↺ Reset to default</div></div>' +
 
       '<div class="setting-block"><span class="field-label">// REPLY STYLE (YOUR VOICE)</span>' +
-      '<textarea id="zs-style" rows="3" placeholder="Describe yourself like you would describe a friend." style="' + INP + 'resize:vertical;">' + esc(cfg.style) + '</textarea></div>';
+      '<textarea id="zs-style" rows="3" placeholder="Describe yourself like you would describe a friend." style="' + INP + 'resize:vertical;">' + esc(cfg.style) + '</textarea></div>' + kwBlock();
     wire(el);
+    kwRefresh(el);
   }
   function wire(el) {
     [].forEach.call(el.querySelectorAll('[data-tone]'), function (b) {
@@ -704,6 +753,26 @@
     el.querySelector('#zs-cprompt').onchange = function () { save({ customTone: this.value.trim() }); };
     el.querySelector('#zs-cwords').onchange = function () { save({ customWords: this.value.trim() }); };
     el.querySelector('#zs-style').onchange = function () { save({ style: this.value.trim() }); };
+    el.querySelector('#zs-kwauto').onchange = function () { save({ kwAuto: this.checked }); kwRefresh(el); };
+    el.querySelector('#zs-kwcon').onchange = function () { save({ kwCustomOn: this.checked }); kwRefresh(el); };
+    el.querySelector('#zs-kwcustom').oninput = function () { kwRefresh(el); };
+    el.querySelector('#zs-kwcustom').onchange = function () { save({ kwCustom: this.value.trim() }); kwRefresh(el); };
+    [].forEach.call(el.querySelectorAll('[data-kwmode]'), function (b) {
+      b.onclick = function () { save({ kwMode: b.getAttribute('data-kwmode') }); render(); };
+    });
+    el.querySelector('#zs-bl').onchange = function () {
+      var list = parseHandles(this.value), wl = cfg.whiteList.filter(function (h) { return list.indexOf(h) < 0; });   // a blacklisted account can never also be whitelisted
+      save({ blackList: list, whiteList: wl });
+      this.value = list.map(function (h) { return '@' + h; }).join('\n');
+      var w = $('zs-wl'); if (w) w.value = wl.map(function (h) { return '@' + h; }).join('\n');
+      var st = $('zs-blst'); if (st) st.textContent = list.length ? '✓ Saved · ' + list.length + ' blacklisted' : '✓ Saved · list is empty';
+    };
+    el.querySelector('#zs-wl').onchange = function () {
+      var list = parseHandles(this.value).filter(function (h) { return cfg.blackList.indexOf(h) < 0; });
+      save({ whiteList: list });
+      this.value = list.map(function (h) { return '@' + h; }).join('\n');
+      var st = $('zs-wlst'); if (st) st.textContent = list.length ? '✓ Saved · ' + list.length + ' whitelisted' : '✓ Saved · list is empty';
+    };
   }
   function init() {
     var sh = $('settings-sheet'); if (!sh) return;
