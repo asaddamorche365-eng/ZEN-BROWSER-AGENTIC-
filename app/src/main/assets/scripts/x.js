@@ -20,7 +20,14 @@
     // SEA search: the Engine screen builds the final search URL (keywords + filters, or the ON custom query) into seaUrl
     seaUrl: '',
     // Extra Safety 2 (open the post first), separate for each engine
-    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30 };
+    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30,
+    // Keyword Reply (port of the extension's Keywords tab): short posts (Gm / Gn / HHM ...) get a short human-style reply, no AI call.
+    // kwAuto = built-in keywords on/off · kwCustomOn + kwCustom = your own keywords (comma separated) · kwMode = 'both' (custom + built-in) | 'custom' (only custom)
+    kwAuto: true, kwCustomOn: true, kwCustom: '', kwMode: 'both',
+    // Account list (extension's Blacklist): never comment on these accounts. Array of lowercase handles (no @).
+    blackList: [], whiteList: [],
+    // Telegram engines (tg.js panel): like before comment, null = use the shared Like setting
+    tgLike: null, tgLikePct: null };
   // settings + runtime toggles live in the app (SharedPreferences) so the Engine settings page and this panel share them
   function loadCfg() {
     var c = {};
@@ -172,6 +179,59 @@
     var kws = String(cfg.targetKw || '').split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
     if (!kws.length) return true;
     text = text.toLowerCase(); return kws.some(function (k) { return text.indexOf(k) >= 0; });
+  }
+
+  // ---------------- Keyword Reply (port of the extension) ----------------
+  // Short posts like "GM guys" get a short human-style reply built locally (no AI). The built-in list is shown in Settings -> Keywords.
+  var BUILTIN_KW = ['gm', 'gn', 'hhm', 'gmm', 'gnnn', 'gmmm', 'happy mutant monday', 'happy mutant', 'good morning', 'good night', 'morning', 'night'];
+  var GM_REPLIES = ['Gmm {name}', 'Gm {name}', 'Gmmm {name}', 'morning {name}', 'morning legend {name}', 'Gm boss', 'Gm fam', 'Gm ser', 'gm gm', 'rise n grind {name}', 'morning vibes {name}', 'Gm Gm {name}'];
+  var GN_REPLIES = ['Gn {name}', 'Gnnn {name}', 'sleep well {name}', 'Gn fam', 'rest up {name}', 'Gn ser', 'gn gn', 'night {name}', 'sweet dreams {name}'];
+  var HHM_REPLIES = ['HHM {name}', 'HHM ser', 'happy mutant {name}', 'HHM fam', 'mutant monday {name}', 'hhm hhm', 'Mutants stay wild {name}'];
+  var GENERIC_SHORT_REPLIES = ['Gm {name}', 'letsgooo {name}', 'based {name}', 'fr {name}', 'say less {name}', 'W {name}', 'real one {name}', 'facts {name}', 'this {name}', 'always {name}'];
+  var KW_MAX_LEN = 120;   // only short posts are keyword posts
+  function kwWord(t, kw) {   // whole-word / whole-phrase match ("gn" must not hit "design")
+    var i = 0, L = /[\p{L}\p{N}]/u;
+    while ((i = t.indexOf(kw, i)) >= 0) {
+      var b = i === 0 || !L.test(t.charAt(i - 1)), e = i + kw.length >= t.length || !L.test(t.charAt(i + kw.length));
+      if (b && e) return true; i++;
+    }
+    return false;
+  }
+  function customKws() { return String(cfg.kwCustom || '').split(/[,\n]/).map(function (k) { return k.trim().toLowerCase(); }).filter(Boolean); }
+  function kwBuiltInActive() { return cfg.kwAuto !== false && !(cfg.kwCustomOn !== false && cfg.kwMode === 'custom'); }   // "only custom" turns the built-in list off
+  function kwMatch(post) {
+    var t = String(post || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!t || t.length > KW_MAX_LEN) return false;
+    if (kwBuiltInActive() && BUILTIN_KW.some(function (k) { return kwWord(t, k); })) return true;
+    if (cfg.kwCustomOn !== false && customKws().some(function (k) { return kwWord(t, k); })) return true;
+    return false;
+  }
+  function firstName(a) {
+    try {
+      var n = a.querySelector('[data-testid="User-Name"] span'); var raw = n ? txt(n).trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9]/g, '') : '';
+      return raw.length > 1 ? raw : '';
+    } catch (e) { return ''; }
+  }
+  function shortReply(post, name) {
+    var t = String(post || '').toLowerCase(), pool;
+    if (/\bgn\b|good night|gnnn|sleep well/.test(t)) pool = GN_REPLIES;
+    else if (/hhm|happy mutant/.test(t)) pool = HHM_REPLIES;
+    else if (/\bgm\b|good morning|gmm|morning/.test(t)) pool = GM_REPLIES;
+    else pool = GENERIC_SHORT_REPLIES;
+    return pool[Math.floor(Math.random() * pool.length)].replace('{name}', name || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // ---------------- Blacklist (port of the extension's Account Lists) ----------------
+  var blKey = null, blSet = {};
+  function isBlocked(a) {
+    try {
+      var raw = cfg.blackList, key = Array.isArray(raw) ? raw.join(',') : String(raw || '');
+      if (key !== blKey) {
+        blKey = key; blSet = {};
+        (Array.isArray(raw) ? raw : key.split(/[\s,]+/)).forEach(function (h) { h = String(h || '').trim().replace(/^@/, '').toLowerCase(); if (h) blSet[h] = 1; });
+      }
+      var au = author(a); return !!au && blSet[au] === 1;
+    } catch (e) { return false; }
   }
 
   // ---------------- clicking / typing ----------------
@@ -669,6 +729,7 @@
     if (busy.has(a)) return false;
     var sid = statusId(a);
     if (sid && replied[sid]) { btn.remove(); return false; }
+    if (isBlocked(a)) { btn.remove(); noteSkip(a); toast('Blacklisted account - skipped', 'warn'); return false; }
     var te = a.querySelector('[data-testid="tweetText"]');
     var post = te ? txt(te).trim() : '';
     if (!post) { toast('No text on this post', 'warn'); return false; }
@@ -701,13 +762,20 @@
       var ed = await openReplyBox(ar); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
       setStat('Generating reply');
-      usedTone = pickTone();
-      var reply = cleanReply(await gen(post, usedTone, eng)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
+      var reply = '';
+      if (kwMatch(post)) { reply = cleanReply(shortReply(post, firstName(a))); if (reply) usedTone = 'Keyword'; }   // short keyword post: local short reply, no AI call
+      if (!reply) {
+        usedTone = pickTone();
+        reply = cleanReply(await gen(post, usedTone, eng)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
+      }
       await genWait();
       if (!(await insertText(ed, reply))) throw new Error('Text did not land in the box');
       ourTexts[normT(reply)] = 1;
       var posted = false;
-      if (cfg.auto) { setStat('Posting'); posted = await postReply(liveEditor() || ed); }
+      if (cfg.auto || eng === 'TG') {
+        if (eng === 'TG' && !tgGet().running) throw new Error('Stopped');   // Stop pressed while the reply was being written
+        setStat('Posting'); posted = await postReply(liveEditor() || ed);
+      }
       btn.textContent = 'DONE'; btn.classList.add('zen-done'); btn.style.opacity = '.6';
       if (posted) { markReplied(sid, eng); stat.done++; }
       logEv({ k: posted ? 'reply' : 'draft', e: eng, id: sid, a: author(a) || '', p: post.slice(0, 160), r: reply, tone: usedTone });
@@ -730,6 +798,7 @@
     var te = a.querySelector('[data-testid="tweetText"]');
     if (isOwn(a) || (te && ourTexts[normT(txt(te))])) { done.add(a); noteSkip(a); return; }   // own posts: always skipped
     if (isReply(a)) { done.add(a); noteSkip(a); return; }                                      // comments: always skipped
+    if (isBlocked(a)) { done.add(a); noteSkip(a); return; }                                    // blacklisted account: never commented on
     if (eng === 'SEA') {
       var v = ageVerdict(a); if (v !== 'ok') { done.add(a); if (v === 'old') { var o = statusId(a); if (o) oldSeen[o] = 1; } return; }
     } else {
@@ -743,6 +812,99 @@
     b.style.cssText = 'margin-left:8px;padding:2px 10px;border-radius:12px;border:1px solid #7c5af5;background:#1a1330;color:#c4b5fd;font:700 12px sans-serif';
     b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); handleClick(a, b, eng); });
     bar.appendChild(b);
+  }
+
+  // ---------------- Telegram jobs: TG SWEEP + TG ENGAGE (port of the extension's Telegram engines) ----------------
+  // tg.js (web.telegram.org) collects / finds the links and writes the job (ZenEng.startTgJob / patchTgJob). This X side does the per-link work:
+  // open the post -> like (optional) -> reply (same tone / style / keyword reply as SEA + FED) -> post -> gap / break -> next link.
+  // The job lives in the app (not in the page), so a reload never loses the place. Result of a link: done | failed | skipped | off | gone | blacklist | own.
+  //   SWEEP : job.queue[] + job.idx (this side walks the whole list by itself)
+  //   ENGAGE: job.phase 'X' + job.cur (tg.js finds each next link in the chat; this side reports back with phase 'FIND_NEXT' + job.waitUntil)
+  var tgBusy = false;
+  function tgGet() { try { return JSON.parse((window.ZenEng && window.ZenEng.getTgJob && window.ZenEng.getTgJob()) || '{}') || {}; } catch (e) { return {}; } }
+  function tgPatch(p) { try { if (window.ZenEng && window.ZenEng.patchTgJob) window.ZenEng.patchTgJob(JSON.stringify(p)); } catch (e) {} }
+  function linkId(u) { var m = /status\/(\d+)/.exec(String(u || '')); return m ? m[1] : ''; }
+  function tgLabel(j) { return j.mode === 'engage' ? 'TG ENGAGE' : 'TG SWEEP'; }
+  function tgTarget(j) { return j.mode === 'sweep' ? ((j.queue || [])[j.idx || 0] || '') : (j.phase === 'X' ? (j.cur || '') : ''); }
+  function tgGapSec(j, skipped) {   // seconds after a link. Advanced timing wins (like the extension's Telegram numbers); classic: Group Engage 8-20 s, Sweep 30-60 s
+    var r = advRes();
+    if (skipped) return (r && r.flash) ? 0.3 : 1.5 + Math.random() * 1.5;
+    if (r) return rrange(r.next);
+    return j.mode === 'engage' ? rnd(8, 20) : rnd(30, 60);
+  }
+  function tgBreakSec(j) {   // longer break every N replies (Advanced timing: its numbers; classic: Group Engage every 5 replies, 60-120 s; Sweep none)
+    var r = advRes(), every = 0, len = null;
+    if (r) { every = Math.floor(Number(r.breakEvery) || 0); len = r.breakLen; }
+    else if (j.mode === 'engage') { every = 5; len = [60, 120]; }
+    if (every > 0 && (j.sinceBreak || 0) >= every && len && len[1] > 0) return Math.round(rrange(len));
+    return 0;
+  }
+  function tgFinish(j, msg, kind) {
+    tgPatch({ running: false, phase: 'DONE', msg: msg, waitUntil: 0, finishedAt: Date.now() });
+    setStat(msg); toast(tgLabel(j) + ': ' + msg, kind || 'success');
+    logEv({ k: 'run', e: 'TG', done: j.done || 0, skip: (j.skipped || 0) + (j.failed || 0), m: msg });
+  }
+  function tgStop() { var j = tgGet(); if (j.running) { tgPatch({ running: false, phase: 'DONE', msg: 'Stopped', waitUntil: 0 }); setStat('Stopped'); } }
+  async function tgAfter(j0, id, outcome, why) {
+    var j = tgGet(); if (!j.running || tgTarget(j) !== tgTarget(j0) && linkId(tgTarget(j)) !== id) return;
+    var now = Date.now(), okRes = outcome === 'done', failed = outcome === 'failed', skip = !okRes && !failed;
+    var p = { done: (j.done || 0) + (okRes ? 1 : 0), failed: (j.failed || 0) + (failed ? 1 : 0), skipped: (j.skipped || 0) + (skip ? 1 : 0),
+      consec: failed ? (j.consec || 0) + 1 : (okRes ? 0 : (j.consec || 0)), sinceBreak: (j.sinceBreak || 0) + (okRes ? 1 : 0),
+      last: { id: id, s: outcome, why: why || '', t: now }, msg: '' };
+    if (failed) { var fu = (j.failedUrls || []).slice(-199); fu.push(tgTarget(j0) || j.cur || ''); p.failedUrls = fu; }
+    var merged = Object.assign({}, j, p), end = '';
+    if (j.mode === 'sweep') { p.idx = (j.idx || 0) + 1; if (p.idx >= (j.queue || []).length) end = 'Sweep finished'; }
+    else { p.phase = 'FIND_NEXT'; p.lastMid = j.curMid; p.engaged = (j.engaged || []).slice(-1500).concat(id); if (j.endLink && linkId(j.endLink) === id) end = 'Reached the end link'; }
+    if (!end && p.consec >= 5) end = 'Stopped: 5 failed links in a row';
+    if (end) { tgPatch(p); tgFinish(Object.assign({}, merged, p), end, p.consec >= 5 ? 'error' : 'success'); return; }
+    var wait, brk = tgBreakSec(merged);
+    if (brk > 0) { wait = brk; p.sinceBreak = 0; p.brk = true; } else { wait = tgGapSec(j, skip); p.brk = false; }
+    p.waitUntil = now + Math.round(wait * 1000); p.navAt = 0; p.stepAt = p.waitUntil;
+    tgPatch(p);
+  }
+  async function tgWork(j, link, id) {
+    tgBusy = true; var outcome = 'failed', why = '';
+    try {
+      tgPatch({ msg: 'Replying on X' }); setStat(tgLabel(j) + ' - reading post');
+      var art = await waitFor(function () {
+        if (pageDead() || toastDead()) return 'dead';
+        var x = articles().filter(function (y) { return statusId(y) === id; })[0];
+        return x && x.querySelector('[data-testid="reply"]') ? x : null;
+      }, 15000);
+      if (art === 'dead') outcome = 'gone';
+      else if (!art) { outcome = 'failed'; why = 'Post did not load'; }
+      else if (replied[id]) outcome = 'skipped';            // already replied by SEA / FED / an earlier TG run
+      else if (isBlocked(art)) outcome = 'blacklist';
+      else if (isOwn(art)) outcome = 'own';
+      else {
+        var b = document.createElement('button'); b.textContent = 'TG';
+        if (await handleClick(art, b, 'TG')) outcome = 'done';
+        else { var rec = replied[id]; outcome = (rec && rec.e === 'off') ? 'off' : (rec && rec.e === 'deleted') ? 'gone' : 'failed'; if (outcome === 'failed') why = 'Reply failed'; }
+      }
+      if (fatalMsg) { var fm = fatalMsg; fatalMsg = ''; tgFinish(Object.assign({}, tgGet()), fm, 'error'); return; }
+      await tgAfter(j, id, outcome, why);
+    } catch (e) { try { await tgAfter(j, id, 'failed', String(e && e.message || e).slice(0, 80)); } catch (e2) {} }
+    finally { tgBusy = false; }
+  }
+  function tgTick() {
+    if (tgBusy || autoRunning) return;
+    var j = tgGet(); if (!j.running) return;
+    var now = Date.now(), lab = tgLabel(j);
+    if (j.waitUntil && now < j.waitUntil) { setStat(lab + ' - ' + (j.brk ? 'break' : 'next link') + ' in ' + Math.ceil((j.waitUntil - now) / 1000) + 's'); return; }
+    if (loginWall()) { tgFinish(j, 'X logged out - log in again', 'error'); return; }
+    if (j.mode === 'sweep' && (j.idx || 0) >= (j.queue || []).length) { tgFinish(j, 'Sweep finished'); return; }
+    var target = tgTarget(j);
+    if (!target) { setStat(lab + ' - waiting for Telegram'); return; }
+    var id = linkId(target);
+    if (j.stepAt && now - j.stepAt > 240000) {   // X never finished this link (4 min): count it failed and move on
+      tgBusy = true; tgAfter(j, id, 'failed', 'Timed out').then(function () { tgBusy = false; }, function () { tgBusy = false; }); return;
+    }
+    if (statusPageId() === id) { tgWork(j, target, id); return; }
+    setStat(lab + ' - opening post');
+    if ((!j.navAt || now - j.navAt > 30000) && /^https:\/\/(x|twitter)\.com\/[A-Za-z0-9_]+\/status\/\d+/.test(target)) {
+      tgPatch({ navAt: now, stepAt: j.stepAt || now });
+      try { location.href = target; } catch (e) {}
+    }
   }
 
   // ---------------- auto loop ----------------
@@ -775,7 +937,7 @@
         if (loginWall()) { stopMsg = 'X logged out - log in again'; break; }
         if (!navigator.onLine) { setStat('Offline - waiting for connection'); if (!(await waitOnline(300000))) { stopMsg = 'No internet for 5 min'; break; } }
         if (fatalMsg) { stopMsg = fatalMsg; fatalMsg = ''; break; }
-        var target = articles().filter(function (a) { var b = a.querySelector('.' + cls); return b && !b.disabled && !autoSkip.has(a) && !busy.has(a); })[0];
+        var target = articles().filter(function (a) { var b = a.querySelector('.' + cls); return b && !b.disabled && !autoSkip.has(a) && !busy.has(a) && !isBlocked(a); })[0];
         if (!target) {
           if (timelineError()) {
             await sleep(1500);
@@ -831,6 +993,7 @@
     if (!/\/compose\/|\/status\//.test(location.pathname) && !loginWall()) goodUrl = location.href;
     if (es1Busy) return;   // Extra Safety 1 cool-down routine is running
     if (es2Back && Date.now() - es2Back.ts < 240000) return;   // Extra Safety 2 detour: do not touch the page
+    try { tgTick(); } catch (e) {}
     var m = curMode();
     if (m !== lastMode) { teardown(); lastMode = m; if (m) toast(m + ' engine ON — buttons appear on posts', 'success'); }
     if (!m) return;
@@ -855,15 +1018,24 @@
       '<div style="font-size:12px;color:#9ca3af;margin-bottom:10px">Replied ' + stat.done + ' / ' + (m ? ecfg(m, 'Max') : cfg.maxRun) + ' · Skipped ' + stat.skip + '</div>' +
       (cfg.sea && cfg.seaUrl && !isSearchUrl() ? '<div data-act="gosea" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd;margin-bottom:8px">Open my search (SEA)</div>' : '') +
       (cfg.fed && !isHomeUrl() ? '<div data-act="gofed" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd;margin-bottom:8px">Open home feed (FED)</div>' : '') +
+      tgPanelLine() +
       '<div data-act="auto" style="text-align:center;padding:12px 0;border-radius:12px;font-weight:800;background:' + (cfg.auto ? '#b91c1c' : '#6d28d9') + ';margin-bottom:8px">' + (cfg.auto ? 'STOP' : 'START') + '</div>' +
       '<div data-act="settings" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd">Settings</div>';
+  }
+  function tgPanelLine() {
+    var j = tgGet(); if (!j.running) return '';
+    var tot = j.mode === 'sweep' ? ' / ' + (j.queue || []).length : '';
+    return '<div style="border:1px solid #1d4ed8;border-radius:10px;padding:8px;margin-bottom:8px;font-size:12px;color:#bfdbfe"><b>' + tgLabel(j) + '</b> running · ' + (j.done || 0) + tot + ' done · ' + (j.failed || 0) + ' failed · ' + (j.skipped || 0) + ' skipped' +
+      '<div data-act="tgstop" style="text-align:center;padding:8px 0;margin-top:6px;border-radius:8px;font-weight:800;background:#b91c1c;color:#fff">STOP TELEGRAM RUN</div></div>';
   }
   function onPanelTap(e) {
     var t = e.target.closest ? e.target.closest('[data-act]') : null; if (!t) return;
     var act = t.getAttribute('data-act');
     if (act === 'sea' || act === 'fed') { var p = {}; p[act] = !cfg[act]; patchCfg(p); lastMode = '#'; scan(); }
+    else if (act === 'tgstop') { tgStop(); }
     else if (act === 'auto') {
-      if (cfg.auto) { patchCfg({ auto: false }); setStat('Stopping'); }
+      if (tgGet().running) { toast('A Telegram run is active - stop it first', 'warn'); }
+      else if (cfg.auto) { patchCfg({ auto: false }); setStat('Stopping'); }
       else if (!(cfg.sea || cfg.fed)) toast('Turn on SEA or FED first', 'warn');
       else if (!curMode()) toast('Open x.com/search (SEA) or x.com/home (FED)', 'warn');
       else { clearRun(); stat.done = 0; stat.skip = 0; patchCfg({ auto: true }); scan(); }
