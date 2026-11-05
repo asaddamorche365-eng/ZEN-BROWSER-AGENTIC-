@@ -571,11 +571,23 @@ class MainActivity : Activity() {
 
     // true while the SEA/FED engine is running in AUTO mode (cfg "auto")
     private fun engineAutoOn(): Boolean {
-        return try {
+        val auto = try {
             JSONObject(engCfgGetStr()).optBoolean("auto", false)
         } catch (e: Exception) {
             false
         }
+        return auto || tgRunning()
+    }
+
+    // a web.telegram.org tab (Telegram engines run there)
+    private fun isTgWebTab(t: Tab): Boolean {
+        if (t.isHome || t.isZ1) return false
+        val host: String? = try {
+            Uri.parse(t.web.url ?: "").host
+        } catch (e: Exception) {
+            null
+        }
+        return host == "web.telegram.org"
     }
 
     // an x.com / twitter.com web tab (not Home, not Z1)
@@ -597,8 +609,8 @@ class MainActivity : Activity() {
             if (idx == i) {
                 t.web.visibility = View.VISIBLE
                 t.web.bringToFront()
-            } else if (autoOn && isXWebTab(t)) {
-                // Engine AUTO is running in this X tab: keep it VISIBLE (it stays behind the active tab, which is opaque).
+            } else if (autoOn && (isXWebTab(t) || isTgWebTab(t))) {
+                // Engine AUTO / a Telegram job is running in this X (or Telegram) tab: keep it VISIBLE (it stays behind the active tab, which is opaque).
                 // A GONE WebView gets no frames and X stops loading posts, so the engine would stall while you watch YouTube in another tab.
                 t.web.visibility = View.VISIBLE
             } else {
@@ -1003,7 +1015,7 @@ class MainActivity : Activity() {
     //  Result: window.__zenEngCb(callbackId, jsonString)  ->  {ok:true,text} | {ok:false,error}
     // =====================================================================
 
-    private fun openXUrlUi(url: String) {
+    private fun openXUrlUi(url: String, front: Boolean = true) {
         if (!isXHost(Uri.parse(url).host)) return
         var idx = -1
         for (i in tabs.indices) {
@@ -1011,12 +1023,48 @@ class MainActivity : Activity() {
             if (!t.isHome && !t.isZ1 && isXHost(Uri.parse(t.web.url ?: "").host)) { idx = i; break }
         }
         if (idx >= 0) {
-            switchTo(idx)
+            if (front) switchTo(idx)
             tabs[idx].web.loadUrl(url)
         } else newTab(false, url)
     }
 
     private fun engPrefs() = getSharedPreferences("zen_eng", Context.MODE_PRIVATE)
+
+    // ---- Telegram jobs (TG ENGAGE / TG SWEEP): one JSON object in SharedPreferences "zen_eng" key "tgjob".
+    // tg.js (web.telegram.org) and x.js (x.com) both read it and patch it (merged per top-level key, null removes a key).
+    // running=true keeps the X tab and the Telegram tab alive in the background, same as the SEA/FED AUTO mode.
+    private val tgLock = Any()
+
+    private fun tgJobGetStr(): String = synchronized(tgLock) { engPrefs().getString("tgjob", "{}") ?: "{}" }
+
+    private fun tgRunning(): Boolean {
+        return try {
+            JSONObject(tgJobGetStr()).optBoolean("running", false)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun tgJobPatch(patchJson: String, replace: Boolean) {
+        var touchRun = false
+        synchronized(tgLock) {
+            try {
+                val base = if (replace) JSONObject() else JSONObject(engPrefs().getString("tgjob", "{}") ?: "{}")
+                val p = JSONObject(patchJson)
+                touchRun = p.has("running")
+                val keys = p.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    if (p.isNull(k)) base.remove(k) else base.put(k, p.get(k))
+                }
+                val out = base.toString()
+                if (out.length <= 400000) engPrefs().edit().putString("tgjob", out).apply()
+            } catch (e: Exception) {
+            }
+        }
+        // running switched on/off: re-apply tab visibility so the X + Telegram tabs keep running (or are released)
+        if (touchRun) runOnUiThread { switchTo(this.cur) }
+    }
 
     private val engCfgKeys = arrayOf("sea", "fed", "auto", "like", "likePct", "target", "targetKw", "tone", "style",
         "keyword", "maxRun", "paceMin", "paceMax", "ageOn", "ageMinMin", "ageMaxMin", "myHandle",
@@ -1025,7 +1073,9 @@ class MainActivity : Activity() {
         "tMethod", "tN", "tTotal", "cSpeed", "cGap", "ldMin", "ldMax",
         "seaLike", "seaLikePct", "seaMax", "seaKeyword", "fedLike", "fedLikePct", "fedMax", "fedKeyword",
         "seaKw", "seaQs", "seaQActive", "seaRes", "seaUrl",
-        "seaEs2", "seaEs2Pct", "fedEs2", "fedEs2Pct")
+        "seaEs2", "seaEs2Pct", "fedEs2", "fedEs2Pct",
+        "kwAuto", "kwCustomOn", "kwCustom", "kwMode", "blackList", "whiteList",
+        "tgLike", "tgLikePct")
 
     private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
 
@@ -1075,6 +1125,48 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun openSettings() {
             runOnUiThread { openEngSettings() }
+        }
+
+        // ---- Telegram jobs: only x.com / twitter.com / web.telegram.org pages may use these ----
+        private fun tgPageOk(): Boolean {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var pageUrl = ""
+            runOnUiThread {
+                try { pageUrl = owner.url ?: "" } catch (e: Exception) { }
+                latch.countDown()
+            }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            val host = try { Uri.parse(pageUrl).host } catch (e: Exception) { null }
+            return isXHost(host) || host == "web.telegram.org"
+        }
+
+        @JavascriptInterface
+        fun getTgJob(): String = tgJobGetStr()
+
+        @JavascriptInterface
+        fun startTgJob(json: String) {
+            if (tgPageOk()) tgJobPatch(json, true)
+        }
+
+        @JavascriptInterface
+        fun patchTgJob(json: String) {
+            if (tgPageOk()) tgJobPatch(json, false)
+        }
+
+        // open an x.com link in the X tab (front=false: load it behind the current tab, the X tab stays alive while a job runs)
+        @JavascriptInterface
+        fun openX(url: String, front: Boolean) {
+            if (!tgPageOk()) return
+            runOnUiThread { openXUrlUi(url, front) }
+        }
+
+        @JavascriptInterface
+        fun openTelegram() {
+            if (!tgPageOk()) return
+            runOnUiThread {
+                val i = tabs.indexOfFirst { isTgWebTab(it) }
+                if (i >= 0) switchTo(i)
+            }
         }
 
         @JavascriptInterface
@@ -1684,7 +1776,7 @@ function s(){var q=document.getElementById('q').value.trim();if(q)Z.search(q);re
         super.onUserLeaveHint()
         if (Build.VERSION.SDK_INT < 26) return
         try {
-            val running = JSONObject(engCfgGetStr()).optBoolean("auto", false)
+            val running = engineAutoOn()
             if (running) {
                 enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(9, 16)).build())
             }
