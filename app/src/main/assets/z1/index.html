@@ -17257,9 +17257,10 @@ function zrcMakeHud(host, title, withCmd, opts) {
     cSpeed: 'normal', cGap: 5, ldMin: 0, ldMax: 0,
     seaKw: [], seaQs: [], seaQActive: '', seaRes: 'top', seaFMedia: false, seaFReplies: false, seaFVerified: false, seaFLinks: false, seaFRt: false,
     seaMinRep: '', seaMinFav: '', seaLang: '', seaWithin: '', seaUrl: '',
-    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30 };
+    seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30, tgLike: null, tgLikePct: null,
+    folSpeed: 'safe', folMin: 120, folMax: 240, unfMode: 'nonfollowers', unfLimit: 0, unfMin: 15, unfMax: 20, unfBreakEvery: 15, unfBreakSec: 120 };
   var cfg = {}, view = 'home', qShown = 3;
-  var VIEW_TITLE = { timing: 'Timing', fed: 'FED Engine', sea: 'Search Engine' };
+  var VIEW_TITLE = { timing: 'Timing', fed: 'FED Engine', sea: 'Search Engine', tgeng: 'TG Engage', tgsw: 'TG Sweep', fol: 'Follow Engine', unf: 'Auto Unfollow' };
   function loadCfg() {
     var c = {}; try { c = JSON.parse(B.engCfgGet() || '{}') || {}; } catch (e) {}
     cfg = {}; for (var k in DEF) cfg[k] = (k in c) ? c[k] : DEF[k];
@@ -17284,7 +17285,11 @@ function zrcMakeHud(host, title, withCmd, opts) {
   var IC = {
     timing: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 2h6"/></svg>',
     fed: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M4.9 19.1a10 10 0 1 1 14.2 0"/><path d="M7.8 16.2a6 6 0 1 1 8.4 0"/></svg>',
-    sea: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+    sea: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+    tgeng: '<svg viewBox="0 0 24 24"><path d="M22 3L2 11l7 3 3 7z"/><path d="M22 3L9 14"/></svg>',
+    fol: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7"/><path d="M19 8v6M16 11h6"/></svg>',
+    unf: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7"/><path d="M16 11h6"/></svg>',
+    tgsw: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 10 18.7l1-1"/></svg>'
   };
   function goX(url) {
     try { if (B.openXUrl) B.openXUrl(url); else { B.openX(); say('Update the app to open this page directly', 'error'); } } catch (e) { say('Run Z1 inside ZEN browser', 'error'); }
@@ -17490,6 +17495,119 @@ function zrcMakeHud(host, title, withCmd, opts) {
     paintSea();
   }
 
+  // ----- TG Engage + TG Sweep (Telegram engines; the work itself runs in the Telegram tab (tg.js) and the X tab (x.js)) -----
+  function tgJob() { try { return JSON.parse((B.tgJobGet && B.tgJobGet()) || '{}') || {}; } catch (e) { return {}; } }
+  function tgStatHtml() {
+    var j = tgJob();
+    if (!j.running) {
+      var last = (j.phase === 'DONE' && j.msg) ? '<div class="zp-note" style="margin-top:8px">Last run (' + (j.mode === 'sweep' ? 'sweep' : 'engage') + '): ' + esc(j.msg) + ' · ' + (j.done || 0) + ' done · ' + (j.failed || 0) + ' failed · ' + (j.skipped || 0) + ' skipped</div>' : '';
+      return '<div class="zp-row"><div class="l">STATUS<small>no Telegram run is active</small></div><span class="zp-badge">IDLE</span></div>' + last;
+    }
+    var tot = j.mode === 'sweep' ? ' / ' + (j.queue || []).length : '', left = j.waitUntil && j.waitUntil > Date.now() ? Math.ceil((j.waitUntil - Date.now()) / 1000) : 0;
+    return '<div class="zp-row"><div class="l">' + (j.mode === 'sweep' ? 'TG SWEEP' : 'TG ENGAGE') + ' RUNNING<small>' + esc(left ? (j.brk ? 'break' : 'next link') + ' in ' + left + 's' : (j.msg || 'working')) + '</small></div><span class="zp-badge on">ON</span></div>' +
+      '<div class="zp-note" style="margin:8px 0"><b>' + (j.done || 0) + '</b>' + tot + ' done · <b>' + (j.failed || 0) + '</b> failed · <b>' + (j.skipped || 0) + '</b> skipped</div>' +
+      '<button type="button" class="zp-chip gold" data-act="tgstop" style="width:100%">STOP TELEGRAM RUN</button>';
+  }
+  function tgLikeCard() {
+    var on = cfg.tgLike == null ? !!cfg.like : !!cfg.tgLike, pct = cfg.tgLikePct == null ? (cfg.likePct == null ? 100 : cfg.likePct) : cfg.tgLikePct;
+    return '<div class="zp-card"><div class="zp-lbl">LIKE</div>' + row('Like before comment', 'like the post first, then reply', sw('tg-like', on)) + row('Like %', 'chance to like each post', num('tg-likePct', pct, 1)) + '</div>';
+  }
+  function tgOpenCard(where) {
+    return '<div class="zp-card"><div class="zp-row"><div class="l">OPEN TELEGRAM<small>open the chat, tap the blue <b>TG</b> button, choose ' + where + '</small></div><button type="button" class="zp-chip gold" data-act="gotg">OPEN TELEGRAM</button></div></div>';
+  }
+  function vTgEng() {
+    return '<div class="zp-card"><div class="zp-lbl">GROUP ENGAGE</div><div class="zp-note">Works down a Telegram group from the start post you give (ID or link). It finds each X link in the chat, opens it in the X tab, replies, waits, then moves to the next link. Stops at the end link, after 5 failed links in a row, or after 10 minutes with no new link.</div></div>' +
+      '<div class="zp-card" id="tg-stat">' + tgStatHtml() + '</div>' + tgOpenCard('GROUP ENGAGE') + tgLikeCard() + timingNote() +
+      '<div class="zp-note">Tone, style, keyword reply and the Blacklist apply here too. Classic timing: 8-20 s between links, a 60-120 s break every 5 replies. Advanced timing uses your own numbers.</div>';
+  }
+  function vTgSw() {
+    return '<div class="zp-card"><div class="zp-lbl">LINK SWEEP</div><div class="zp-note">Give it a starting post. It scrolls the chat down to the newest message, collects every X link, then runs them as a queue in chat order. Whitelisted accounts go first, blacklisted accounts and your own posts are dropped. Collected lists can be saved as folders and run later.</div></div>' +
+      '<div class="zp-card" id="tg-stat">' + tgStatHtml() + '</div>' + tgOpenCard('LINK SWEEP') + tgLikeCard() + timingNote() +
+      '<div class="zp-note">Classic timing: 30-60 s between links. Links already replied to are skipped in a couple of seconds. Whitelist / Blacklist are in the Settings sheet.</div>';
+  }
+  setInterval(function () { var e = $('tg-stat'); if (e) { var h = tgStatHtml(); if (e.innerHTML !== h) e.innerHTML = h; } }, 1500);
+
+  // ----- Follow engine + Auto Unfollow (the work runs in the X tab (x.js); jobs live in the app: fjob / ujob) -----
+  function fuJob(k) { try { return JSON.parse((B.jobGet && B.jobGet(k)) || '{}') || {}; } catch (e) { return {}; } }
+  function fuBusyOther() {
+    if (cfg.auto) return 'Stop AUTO mode (the Z button in X) first';
+    if (tgJob().running) return 'A Telegram run is active - stop it first';
+    if (fuJob('fjob').running) return 'Follow is already running';
+    if (fuJob('ujob').running) return 'Auto Unfollow is already running';
+    return '';
+  }
+  function fuStatHtml(k) {
+    var j = fuJob(k), name = k === 'fjob' ? 'FOLLOW' : 'UNFOLLOW';
+    var cnt = k === 'fjob' ? '<b>' + (j.done || 0) + '</b> / ' + (j.queue || []).length + ' followed · <b>' + (j.skipped || 0) + '</b> skipped · <b>' + (j.failed || 0) + '</b> failed'
+      : '<b>' + (j.unfollowed || 0) + '</b>' + (j.limit ? ' / ' + j.limit : '') + ' unfollowed · <b>' + (j.skipped || 0) + '</b> kept · <b>' + (j.failed || 0) + '</b> failed';
+    if (!j.running) {
+      var last = j.status && j.msg ? '<div class="zp-note" style="margin-top:8px">Last run: ' + esc(j.msg) + '<br>' + cnt + '</div>' : '';
+      return '<div class="zp-row"><div class="l">STATUS<small>no ' + name.toLowerCase() + ' run is active</small></div><span class="zp-badge">IDLE</span></div>' + last;
+    }
+    var left = j.waitUntil && j.waitUntil > Date.now() ? Math.ceil((j.waitUntil - Date.now()) / 1000) : 0;
+    return '<div class="zp-row"><div class="l">' + name + ' RUNNING<small>' + esc(left ? 'next in ' + left + 's' : (j.msg || 'working')) + '</small></div><span class="zp-badge on">ON</span></div>' +
+      '<div class="zp-note" style="margin:8px 0">' + cnt + '</div>' +
+      '<button type="button" class="zp-chip gold" data-act="fustop" data-v="' + k + '" style="width:100%">STOP ' + name + '</button>';
+  }
+  function folParse(txt) {
+    var out = [], seen = {}, re = /(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})(?=[\/?#\s,;]|$)|@([A-Za-z0-9_]{1,15})|(^|[\s,;])([A-Za-z0-9_]{1,15})(?=$|[\s,;])/g, m;
+    var RES = { home: 1, i: 1, explore: 1, search: 1, notifications: 1, messages: 1, settings: 1, compose: 1 };
+    while ((m = re.exec(String(txt || '')))) {
+      var u = m[1] || m[2] || m[4]; if (!u || RES[u.toLowerCase()]) continue;
+      var k = u.toLowerCase(); if (seen[k]) continue; seen[k] = 1; out.push(u);
+      if (out.length >= 2000) break;
+    }
+    return out;
+  }
+  var folDraft = '';
+  function vFol() {
+    var sp = cfg.folSpeed || 'safe', cus = sp === 'custom';
+    return '<div class="zp-card"><div class="zp-lbl">FOLLOW ENGINE</div><div class="zp-note">Paste usernames (@name, x.com/name links, or one per line). It opens each profile in the X tab, taps Follow, checks it really changed, waits, then moves on. Already-followed accounts are skipped fast. Stops at the end of the list, on an X limit message, or after 5 failures in a row.</div></div>' +
+      '<div class="zp-card" id="fu-stat-f">' + fuStatHtml('fjob') + '</div>' +
+      '<div class="zp-card"><div class="zp-lbl">USERNAMES</div><textarea class="zp-in zp-mono" id="fol-list" rows="6" spellcheck="false" placeholder="@name1&#10;@name2&#10;https://x.com/name3" style="width:100%">' + esc(folDraft) + '</textarea><div class="zp-note" id="fol-count" style="margin-top:6px"></div></div>' +
+      '<div class="zp-card"><div class="zp-lbl">SPEED</div>' + row('Gap between follows', 'slower = safer for your account',
+        '<select class="zp-in" id="fol-speed" style="width:150px"><option value="safe"' + (sp === 'safe' ? ' selected' : '') + '>Safe 2-4 min</option><option value="normal"' + (sp === 'normal' ? ' selected' : '') + '>Normal 1-2 min</option><option value="fast"' + (sp === 'fast' ? ' selected' : '') + '>Fast 20-40 s (risky)</option><option value="custom"' + (cus ? ' selected' : '') + '>Custom</option></select>') +
+      (cus ? row('Min seconds', '', num('fol-min', cfg.folMin, 5)) + row('Max seconds', '', num('fol-max', cfg.folMax, 5)) : '') + '</div>' +
+      '<button type="button" class="zp-chip gold" data-act="folstart" style="width:100%;margin-bottom:10px">START FOLLOW</button>' +
+      '<div class="zp-note">Needs you logged in to X in the X tab. New accounts: keep it under ~100 follows a day.</div>';
+  }
+  function vUnf() {
+    var m = cfg.unfMode || 'nonfollowers';
+    return '<div class="zp-card"><div class="zp-lbl">AUTO UNFOLLOW</div><div class="zp-note">Opens your Following list in the X tab and taps Following → Unfollow on each row, with a gap and a break every few unfollows. Non-followers only keeps everyone who follows you back (marked "Follows you"). Stops at your target, on an X limit message, or after 3 refused unfollows in a row.</div></div>' +
+      '<div class="zp-card" id="fu-stat-u">' + fuStatHtml('ujob') + '</div>' +
+      '<div class="zp-card"><div class="zp-lbl">SETTINGS</div>' +
+      row('Who to unfollow', 'mutuals are kept in the first mode', '<select class="zp-in" id="unf-mode" style="width:150px"><option value="nonfollowers"' + (m === 'nonfollowers' ? ' selected' : '') + '>Non-followers only</option><option value="all"' + (m === 'all' ? ' selected' : '') + '>Everyone</option></select>') +
+      row('Target', 'unfollow this many, then stop (0 = whole list)', num('unf-limit', cfg.unfLimit, 0)) +
+      row('Gap min (s)', '', num('unf-min', cfg.unfMin, 3)) + row('Gap max (s)', '', num('unf-max', cfg.unfMax, 3)) +
+      row('Break every', 'unfollows (0 = no break)', num('unf-be', cfg.unfBreakEvery, 0)) + row('Break length (s)', '', num('unf-bs', cfg.unfBreakSec, 0)) + '</div>' +
+      row2('My @handle', cfg.myHandle) +
+      '<button type="button" class="zp-chip gold" data-act="unfstart" style="width:100%;margin:10px 0">START UNFOLLOW</button>' +
+      '<div class="zp-note">Uses your @handle (Engine home → Account) to open your Following page. Stay under ~200 unfollows a day.</div>';
+  }
+  function row2(l, h) { return '<div class="zp-card"><div class="zp-row"><div class="l">' + l + '<small>' + (h ? '@' + esc(String(h).replace(/^@/, '')) : 'not set - set it on the Engine home screen') + '</small></div></div></div>'; }
+  function fuStart(kind) {
+    loadCfg();
+    var why = fuBusyOther(); if (why) { say(why, 'error'); return; }
+    if (!B.jobStart) { say('Update the app to use this engine', 'error'); return; }
+    if (kind === 'fol') {
+      var q = folParse(($('fol-list') || {}).value || folDraft); if (!q.length) { say('Add at least one username', 'error'); return; }
+      var sp = cfg.folSpeed || 'safe', r = sp === 'safe' ? [120, 240] : sp === 'normal' ? [60, 120] : sp === 'fast' ? [20, 40] : [Math.max(5, Number(cfg.folMin) || 120), Math.max(Number(cfg.folMin) || 5, Number(cfg.folMax) || 240)];
+      B.jobStart('fjob', JSON.stringify({ running: true, status: 'running', queue: q, idx: 0, done: 0, skipped: 0, failed: 0, consec: 0, gapMin: r[0], gapMax: r[1], followed: [], startedAt: Date.now(), msg: 'Starting' }));
+      say('Follow started - ' + q.length + ' accounts'); goX('https://x.com/' + q[0]);
+    } else {
+      var h = String(cfg.myHandle || '').replace(/^@/, '').trim(); if (!h) { say('Set My @handle on the Engine home screen first', 'error'); return; }
+      var mn = Math.max(3, Number(cfg.unfMin) || 15), mx = Math.max(mn, Number(cfg.unfMax) || 20);
+      B.jobStart('ujob', JSON.stringify({ running: true, status: 'running', handle: h, mode: cfg.unfMode === 'all' ? 'all' : 'nonfollowers', limit: Math.max(0, Number(cfg.unfLimit) || 0), minSec: mn, maxSec: mx,
+        breakEvery: Math.max(0, Number(cfg.unfBreakEvery) || 0), breakSec: Math.max(0, Number(cfg.unfBreakSec) || 0), unfollowed: 0, skipped: 0, failed: 0, startedAt: Date.now(), msg: 'Starting' }));
+      say('Auto Unfollow started'); goX('https://x.com/' + h + '/following');
+    }
+  }
+  setInterval(function () {
+    var a = $('fu-stat-f'), b = $('fu-stat-u');
+    if (a) { var h1 = fuStatHtml('fjob'); if (a.innerHTML !== h1) a.innerHTML = h1; }
+    if (b) { var h2 = fuStatHtml('ujob'); if (b.innerHTML !== h2) b.innerHTML = h2; }
+  }, 1500);
+
   // ----- home (agent list) -----
   function agentCard(go, title, sub, badge) {
     return '<button type="button" class="zp-ag" data-go="' + go + '"><span class="ic">' + IC[go] + '</span><span class="tx"><b>' + title + '</b><small>' + sub + '</small></span>' +
@@ -17500,6 +17618,10 @@ function zrcMakeHud(host, title, withCmd, opts) {
       agentCard('timing', 'Timing', 'Speed &amp; delays for every engine, in one place', tLabel().split(' · ')[0]) +
       agentCard('fed', 'FED Engine', 'Reply to posts on your home feed', cfg.fed ? 'ON' : 'OFF') +
       agentCard('sea', 'Search Engine', 'Search a keyword, reply to the results', cfg.sea ? 'ON' : 'OFF') +
+      agentCard('tgeng', 'TG Engage', 'Reply to X links in a Telegram group, in order', (tgJob().running && tgJob().mode === 'engage') ? 'ON' : 'OFF') +
+      agentCard('tgsw', 'TG Sweep', 'Collect X links from a Telegram chat, reply to all', (tgJob().running && tgJob().mode === 'sweep') ? 'ON' : 'OFF') +
+      agentCard('fol', 'Follow Engine', 'Follow a list of usernames, one by one', fuJob('fjob').running ? 'ON' : 'OFF') +
+      agentCard('unf', 'Auto Unfollow', 'Unfollow people who do not follow you back', fuJob('ujob').running ? 'ON' : 'OFF') +
       '<div class="zp-card" style="margin-top:14px"><div class="zp-lbl">ACCOUNT</div>' +
       row('My @handle', 'optional, detected automatically. Own posts are always skipped.', '<input class="zp-in" id="f-myHandle" style="width:140px" value="' + esc(cfg.myHandle) + '">') + '</div>' +
       '<div class="zp-note">Start / Stop is the floating <b>Z</b> button inside X. Tone, grammar, big reply and style are in the Settings sheet.</div>';
@@ -17507,8 +17629,8 @@ function zrcMakeHud(host, title, withCmd, opts) {
   function render() {
     var el = $('engine-screen'); if (!el) return;
     loadCfg();
-    var body = view === 'timing' ? vTiming() : view === 'fed' ? vFed() : view === 'sea' ? vSea() : vHome();
-    el.innerHTML = '<div class="zp-wrap">' + (view === 'home' ? '<div class="zp-h">Engine</div><div class="zp-sub">FED · SEA · Timing — keys &amp; profile are in Menu → Profile</div>' : '') + body + '</div>';
+    var body = view === 'timing' ? vTiming() : view === 'fed' ? vFed() : view === 'sea' ? vSea() : view === 'tgeng' ? vTgEng() : view === 'tgsw' ? vTgSw() : view === 'fol' ? vFol() : view === 'unf' ? vUnf() : vHome();
+    el.innerHTML = '<div class="zp-wrap">' + (view === 'home' ? '<div class="zp-h">Engine</div><div class="zp-sub">FED · SEA · TG · Follow · Unfollow · Timing — keys &amp; profile are in Menu → Profile</div>' : '') + body + '</div>';
     wire(el);
     if (view === 'sea') renderQs();
   }
@@ -17527,6 +17649,11 @@ function zrcMakeHud(host, title, withCmd, opts) {
         else if (a === 'mode') { save({ tMode: v }); render(); }
         else if (a === 'method') { save({ tMethod: v }); render(); }
         else if (a === 'gofed') goX('https://x.com/home');
+        else if (a === 'gotg') { try { if (B.openTelegram) B.openTelegram(); else say('Update the app to open Telegram from here', 'error'); } catch (e) { say('Run Z1 inside ZEN browser', 'error'); } }
+        else if (a === 'folstart') fuStart('fol');
+        else if (a === 'unfstart') fuStart('unf');
+        else if (a === 'fustop') { try { if (B.jobStop) B.jobStop(v); } catch (e) {} render(); }
+        else if (a === 'tgstop') { try { if (B.tgJobStop) B.tgJobStop(); } catch (e) {} render(); }
       };
     });
     var cs = el.querySelector('#c-speed'); if (cs) cs.onchange = function () { save({ cSpeed: cs.value }); render(); };
@@ -17547,6 +17674,12 @@ function zrcMakeHud(host, title, withCmd, opts) {
     // engines + shared cards
     bindCheck(el, 'e-fed', 'fed', function () { /* badge refreshes next time the list opens */ });
     bindCheck(el, 'e-sea', 'sea');
+    bindSel(el, 'fol-speed', 'folSpeed', false); bindNum(el, 'fol-min', 'folMin'); bindNum(el, 'fol-max', 'folMax');
+    bindSel(el, 'unf-mode', 'unfMode', false); bindNum(el, 'unf-limit', 'unfLimit'); bindNum(el, 'unf-min', 'unfMin'); bindNum(el, 'unf-max', 'unfMax');
+    bindNum(el, 'unf-be', 'unfBreakEvery'); bindNum(el, 'unf-bs', 'unfBreakSec');
+    var fl = el.querySelector('#fol-list');
+    if (fl) { var upd = function () { folDraft = fl.value; var c = el.querySelector('#fol-count'); if (c) c.textContent = folParse(folDraft).length + ' usernames'; }; fl.oninput = upd; upd(); }
+    bindCheck(el, 'tg-like', 'tgLike'); bindNum(el, 'tg-likePct', 'tgLikePct');
     ['sea', 'fed'].forEach(function (p) {
       bindCheck(el, p + '-like', p + 'Like'); bindNum(el, p + '-likePct', p + 'LikePct'); bindNum(el, p + '-max', p + 'Max');
       bindTxt(el, p + '-kw', p + 'Keyword'); bindCheck(el, p + '-es2', p + 'Es2'); bindNum(el, p + '-es2pct', p + 'Es2Pct');
