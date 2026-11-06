@@ -17560,11 +17560,91 @@ function zrcMakeHud(host, title, withCmd, opts) {
     return out;
   }
   var folDraft = '';
+  // ----- Follow: list from a text / csv file (username or x.com link per line, optional score) -----
+  var folFile = [], folShown = 10, folFname = '';
+  try { var _fs = JSON.parse(localStorage.getItem('zl_folfile') || 'null'); if (_fs && Array.isArray(_fs.items)) { folFile = _fs.items; folFname = _fs.name || ''; } } catch (e) {}
+  function folFileSave() { try { localStorage.setItem('zl_folfile', JSON.stringify({ name: folFname, items: folFile })); } catch (e) {} }
+  function csvSplit(line) {
+    var out = [], cur = '', q = false;
+    for (var i = 0; i < line.length; i++) {
+      var c = line.charAt(i);
+      if (q) { if (c === '"') { if (line.charAt(i + 1) === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === ',' || c === '\t' || c === '|' || c === ';') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    out.push(cur); return out;
+  }
+  function folUser(f) {
+    f = String(f || '').trim(); var m;
+    if ((m = /^(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/@?([A-Za-z0-9_]{1,15})(?:[\/?#].*)?$/i.exec(f))) return m[1];
+    if ((m = /^@?([A-Za-z0-9_]{1,15})$/.exec(f))) return m[1];
+    return null;
+  }
+  function folNum(f) { f = String(f == null ? '' : f).trim(); return /^-?\d+(\.\d+)?$/.test(f) ? Number(f) : null; }
+  function folFileParse(txt) {
+    var lines = String(txt || '').replace(/^\uFEFF/, '').split(/\r?\n/), out = [], seen = {}, ui = -1, si = -1, first = true;
+    var RES = { home: 1, i: 1, explore: 1, search: 1, notifications: 1, messages: 1, settings: 1, compose: 1 };
+    for (var n = 0; n < lines.length; n++) {
+      var line = lines[n].trim(); if (!line) continue;
+      var f = csvSplit(line); if (f.length === 1 && /\s/.test(f[0].trim())) f = f[0].trim().split(/\s+/);
+      if (first) {
+        first = false;
+        var hasH = f.some(function (x) { return /^(username|handle|screen_?name|profile|link|url)$/i.test(x.trim()); });
+        if (hasH) {
+          f.forEach(function (x, j) { x = x.trim(); if (ui < 0 && /^(username|handle|screen_?name|profile|link|url)$/i.test(x)) ui = j; if (si < 0 && /^(score|wc_?score|wallchain.*|points?)$/i.test(x)) si = j; });
+          continue;
+        }
+      }
+      var u = null, sc = null;
+      if (ui >= 0) { u = folUser(f[ui]); if (si >= 0) sc = folNum(f[si]); }
+      else for (var j = 0; j < f.length; j++) {
+        if (u == null) { var x = folUser(f[j]); if (x) u = x; }
+        else { var nn = folNum(f[j]); if (nn != null) sc = nn; }
+      }
+      if (!u || RES[u.toLowerCase()]) continue;
+      var k = u.toLowerCase(); if (seen[k]) continue; seen[k] = 1;
+      out.push({ u: u, s: sc });
+      if (out.length >= 5000) break;
+    }
+    return out;
+  }
+  function folAll() {   // file list first, then typed usernames, no duplicates
+    var out = [], seen = {};
+    folFile.forEach(function (it) { var k = it.u.toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(it.u); } });
+    folParse(folDraft).forEach(function (u) { var k = u.toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(u); } });
+    return out;
+  }
+  function folCountTxt() {
+    var typed = folParse(folDraft).length, all = folAll().length;
+    return folFile.length ? all + ' usernames (' + folFile.length + ' from file, ' + typed + ' typed)' : typed + ' usernames';
+  }
+  function folListHtml() {
+    if (!folFile.length) return '';
+    var n = Math.min(folShown, folFile.length), h = '';
+    for (var i = 0; i < n; i++) {
+      var it = folFile[i];
+      h += '<div class="zp-row" style="padding:6px 0"><div class="l" style="font:600 12px Space Mono,monospace;word-break:break-all">' + (i + 1) + '. @' + esc(it.u) + '</div>' +
+        (it.s != null ? '<span class="zp-badge on">' + esc(it.s) + '</span>' : '') + '</div>';
+    }
+    var left = folFile.length - n;
+    if (left > 0) h += '<button type="button" class="zp-chip" data-act="folmore" style="width:100%;margin-top:8px">LOAD MORE (' + left + ' left)</button>';
+    return h;
+  }
+  function folRefresh() {
+    var l = $('fol-flist'); if (l) { l.innerHTML = folListHtml(); var b = l.querySelector('[data-act="folmore"]'); if (b) b.onclick = function () { folShown += 10; folRefresh(); }; }
+    var c = $('fol-count'); if (c) c.textContent = folCountTxt();
+  }
   function vFol() {
     var sp = cfg.folSpeed || 'safe', cus = sp === 'custom';
     return '<div class="zp-card"><div class="zp-lbl">FOLLOW ENGINE</div><div class="zp-note">Paste usernames (@name, x.com/name links, or one per line). It opens each profile in the X tab, taps Follow, checks it really changed, waits, then moves on. Already-followed accounts are skipped fast. Stops at the end of the list, on an X limit message, or after 5 failures in a row.</div></div>' +
       '<div class="zp-card" id="fu-stat-f">' + fuStatHtml('fjob') + '</div>' +
       '<div class="zp-card"><div class="zp-lbl">USERNAMES</div><textarea class="zp-in zp-mono" id="fol-list" rows="6" spellcheck="false" placeholder="@name1&#10;@name2&#10;https://x.com/name3" style="width:100%">' + esc(folDraft) + '</textarea><div class="zp-note" id="fol-count" style="margin-top:6px"></div></div>' +
+      '<div class="zp-card"><div class="zp-lbl">FROM FILE</div><div class="zp-note">Add a .txt or .csv file: one X profile link or username per line. If a score is on the line (like username,name,score) it is shown too. Start Follow uses the file list first, then the typed names.</div>' +
+      '<input type="file" id="fol-file" accept=".txt,.csv,.text,text/plain,text/csv" style="display:none">' +
+      '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="zp-chip gold" data-act="folpick" style="flex:1">ADD TEXT FILE</button>' + (folFile.length ? '<button type="button" class="zp-chip" data-act="folclear">CLEAR</button>' : '') + '</div>' +
+      (folFile.length ? '<div class="zp-note" style="margin:8px 0 2px">' + esc(folFname || 'file') + ' - ' + folFile.length + ' usernames</div>' : '') +
+      '<div id="fol-flist">' + folListHtml() + '</div></div>' +
       '<div class="zp-card"><div class="zp-lbl">SPEED</div>' + row('Gap between follows', 'slower = safer for your account',
         '<select class="zp-in" id="fol-speed" style="width:150px"><option value="safe"' + (sp === 'safe' ? ' selected' : '') + '>Safe 2-4 min</option><option value="normal"' + (sp === 'normal' ? ' selected' : '') + '>Normal 1-2 min</option><option value="fast"' + (sp === 'fast' ? ' selected' : '') + '>Fast 20-40 s (risky)</option><option value="custom"' + (cus ? ' selected' : '') + '>Custom</option></select>') +
       (cus ? row('Min seconds', '', num('fol-min', cfg.folMin, 5)) + row('Max seconds', '', num('fol-max', cfg.folMax, 5)) : '') + '</div>' +
@@ -17590,7 +17670,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
     var why = fuBusyOther(); if (why) { say(why, 'error'); return; }
     if (!B.jobStart) { say('Update the app to use this engine', 'error'); return; }
     if (kind === 'fol') {
-      var q = folParse(($('fol-list') || {}).value || folDraft); if (!q.length) { say('Add at least one username', 'error'); return; }
+      if ($('fol-list')) folDraft = $('fol-list').value; var q = folAll(); if (!q.length) { say('Add at least one username', 'error'); return; }
       var sp = cfg.folSpeed || 'safe', r = sp === 'safe' ? [120, 240] : sp === 'normal' ? [60, 120] : sp === 'fast' ? [20, 40] : [Math.max(5, Number(cfg.folMin) || 120), Math.max(Number(cfg.folMin) || 5, Number(cfg.folMax) || 240)];
       B.jobStart('fjob', JSON.stringify({ running: true, status: 'running', queue: q, idx: 0, done: 0, skipped: 0, failed: 0, consec: 0, gapMin: r[0], gapMax: r[1], followed: [], startedAt: Date.now(), msg: 'Starting' }));
       say('Follow started - ' + q.length + ' accounts'); goX('https://x.com/' + q[0]);
@@ -17651,6 +17731,9 @@ function zrcMakeHud(host, title, withCmd, opts) {
         else if (a === 'gofed') goX('https://x.com/home');
         else if (a === 'gotg') { try { if (B.openTelegram) B.openTelegram(); else say('Update the app to open Telegram from here', 'error'); } catch (e) { say('Run Z1 inside ZEN browser', 'error'); } }
         else if (a === 'folstart') fuStart('fol');
+        else if (a === 'folpick') { var ffi = $('fol-file'); if (ffi) ffi.click(); }
+        else if (a === 'folmore') { folShown += 10; folRefresh(); }
+        else if (a === 'folclear') { folFile = []; folFname = ''; folShown = 10; folFileSave(); render(); }
         else if (a === 'unfstart') fuStart('unf');
         else if (a === 'fustop') { try { if (B.jobStop) B.jobStop(v); } catch (e) {} render(); }
         else if (a === 'tgstop') { try { if (B.tgJobStop) B.tgJobStop(); } catch (e) {} render(); }
@@ -17678,7 +17761,19 @@ function zrcMakeHud(host, title, withCmd, opts) {
     bindSel(el, 'unf-mode', 'unfMode', false); bindNum(el, 'unf-limit', 'unfLimit'); bindNum(el, 'unf-min', 'unfMin'); bindNum(el, 'unf-max', 'unfMax');
     bindNum(el, 'unf-be', 'unfBreakEvery'); bindNum(el, 'unf-bs', 'unfBreakSec');
     var fl = el.querySelector('#fol-list');
-    if (fl) { var upd = function () { folDraft = fl.value; var c = el.querySelector('#fol-count'); if (c) c.textContent = folParse(folDraft).length + ' usernames'; }; fl.oninput = upd; upd(); }
+    if (fl) { var upd = function () { folDraft = fl.value; var c = el.querySelector('#fol-count'); if (c) c.textContent = folCountTxt(); }; fl.oninput = upd; upd(); }
+    var ffile = el.querySelector('#fol-file');
+    if (ffile) ffile.onchange = function () {
+      var f = ffile.files && ffile.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        var items = folFileParse(r.result);
+        if (!items.length) { say('No usernames found in that file', 'error'); return; }
+        folFile = items; folShown = 10; folFname = f.name; folFileSave(); render(); say(items.length + ' usernames loaded');
+      };
+      r.onerror = function () { say('Could not read the file', 'error'); };
+      r.readAsText(f); try { ffile.value = ''; } catch (e) {}
+    };
     bindCheck(el, 'tg-like', 'tgLike'); bindNum(el, 'tg-likePct', 'tgLikePct');
     ['sea', 'fed'].forEach(function (p) {
       bindCheck(el, p + '-like', p + 'Like'); bindNum(el, p + '-likePct', p + 'LikePct'); bindNum(el, p + '-max', p + 'Max');
