@@ -53,6 +53,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -173,7 +174,9 @@ class MainActivity : Activity() {
     private val userScripts: List<UserScript> by lazy {
         val z1 = Uri.parse(Z1_URL)
         listOf(
+            UserScript("scripts/chromefix.js", setOf("*")),
             UserScript("scripts/all.js", setOf("*")),
+            UserScript("scripts/cdp.js", setOf("https://x.com", "https://twitter.com", "https://web.telegram.org")),
             UserScript("scripts/x.js", setOf("https://x.com", "https://twitter.com")),
             UserScript("scripts/tg.js", setOf("https://web.telegram.org")),
             UserScript("scripts/z1.js", setOf("${z1.scheme}://${z1.host}"))
@@ -536,6 +539,13 @@ class MainActivity : Activity() {
                 if (on) startBackground() else stopBackground()
                 toast(if (on) "Background run: ON" else "Background run: OFF")
             }
+            val cdpOn = cdpEnabled()
+            sheetRow(list, dlg, "\uD83D\uDEE0", "CDP", "Trusted taps / typing / focus for engines (like ZEX+)", if (cdpOn) "ON" else "OFF", cdpOn) {
+                val on = !cdpEnabled()
+                bgPrefs().edit().putBoolean("cdp_on", on).apply()
+                if (!on) Thread { try { cdp.closeSessions(null) } catch (e: Exception) { } }.start()
+                toast(if (on) "CDP: ON" else "CDP: OFF")
+            }
             sheetRow(list, dlg, "\uD83D\uDD0B", "Battery", "Allow unrestricted battery use", null, false) { askBattery() }
             sheetRow(list, dlg, "\uD83E\uDDF9", "Clear cookies & site data", "Logs you out of every site", null, false) {
                 CookieManager.getInstance().removeAllCookies(null)
@@ -548,6 +558,7 @@ class MainActivity : Activity() {
             sheetRow(list, dlg, "\uD83E\uDDE9", "DOM report", "Current tab", null, false) { domReport() }
             sheetRow(list, dlg, "\uD83C\uDFAF", "X selector self-test", "Current tab", null, false) { xSelfTest() }
             sheetRow(list, dlg, "\uD83D\uDD0C", "Bridge test", "Hidden fetch", null, false) { bridgeTest() }
+            sheetRow(list, dlg, "\uD83D\uDEE0", "CDP test", "Devtools socket + trusted input", null, false) { cdpTest() }
         }
     }
 
@@ -623,6 +634,8 @@ class MainActivity : Activity() {
     private fun closeTab(i: Int) {
         if (i <= 0 || i >= tabs.size) return // home (0) cannot be closed
         val t = tabs.removeAt(i)
+        val cid = synchronized(cdpIds) { cdpIds.remove(t.web) }
+        if (cid != null) Thread { try { cdp.closeSessions(cid) } catch (e: Exception) { } }.start()
         content.removeView(t.web)
         t.web.destroy()
         switchTo((i - 1).coerceAtLeast(0))
@@ -694,11 +707,92 @@ class MainActivity : Activity() {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     }
 
+    // ---------------- CDP (Chrome DevTools Protocol through the WebView's own devtools socket) ----------------
+    private val cdp = CdpClient()
+    private val cdpIds = java.util.WeakHashMap<WebView, String>()
+
+    // Menu switch: CDP ON / OFF (default ON). OFF = page scripts get nothing and every devtools session is closed.
+    private fun cdpEnabled(): Boolean = bgPrefs().getBoolean("cdp_on", true)
+
+    // Only input-type commands may be called from page JS (ZenEng.cdp / cdpBatch). Cookie / network / navigation commands are NOT allowed.
+    private val CDP_ALLOW = setOf(
+        "Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText", "Input.dispatchTouchEvent",
+        "Input.synthesizeTapGesture", "Input.synthesizeScrollGesture", "Emulation.setFocusEmulationEnabled", "Emulation.setTouchEmulationEnabled",
+        "Network.emulateNetworkConditions", "Page.bringToFront"
+    )
+
+    // Finds this WebView's devtools target id. Blocking: background thread only.
+    private fun cdpTarget(wv: WebView, force: Boolean): String {
+        if (!force) synchronized(cdpIds) { cdpIds[wv]?.let { return it } }
+        var url = ""
+        val l = java.util.concurrent.CountDownLatch(1)
+        runOnUiThread {
+            try { url = wv.url ?: "" } catch (e: Exception) { }
+            l.countDown()
+        }
+        l.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        val list = cdp.listTargets()
+        var same = list.filter { it.url == url }
+        if (same.size > 1) {
+            // several tabs on the same URL: tag this tab's title for a moment and look for the tag
+            val tag = "__zcdp" + System.currentTimeMillis()
+            val l2 = java.util.concurrent.CountDownLatch(1)
+            runOnUiThread { wv.evaluateJavascript("(function(){window.__zct=document.title;document.title='" + tag + "';})()") { l2.countDown() } }
+            l2.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            Thread.sleep(150)
+            same = cdp.listTargets().filter { it.title.startsWith(tag) }
+            runOnUiThread { wv.evaluateJavascript("(function(){if(window.__zct!==undefined)document.title=window.__zct;})()", null) }
+        }
+        val id = same.firstOrNull()?.id ?: (if (list.size == 1) list[0].id else null)
+            ?: throw java.io.IOException("no devtools target for this tab")
+        synchronized(cdpIds) { cdpIds[wv] = id }
+        return id
+    }
+
+    private fun cdpRun(wv: WebView, cmds: JSONArray): JSONArray {
+        return try {
+            cdp.batch(cdpTarget(wv, false), cmds)
+        } catch (e: CdpClient.ConnectFail) {
+            cdp.batch(cdpTarget(wv, true), cmds)   // stale id: look it up again once
+        }
+    }
+
+    // Debug menu: checks the devtools socket and shows what the current tab answers
+    private fun cdpTest() {
+        val t = tabs[cur]
+        if (t.isHome) {
+            toast("Open a page first")
+            return
+        }
+        toast("CDP test...")
+        val wv = t.web
+        Thread {
+            val text = try {
+                val cmds = JSONArray()
+                    .put(JSONObject().put("method", "Runtime.evaluate").put("params", JSONObject().put("expression", "navigator.userAgent + ' | ' + location.href").put("returnByValue", true)))
+                    .put(JSONObject().put("method", "Browser.getVersion"))
+                    .put(JSONObject().put("method", "Input.dispatchMouseEvent").put("params", JSONObject().put("type", "mouseMoved").put("x", 5).put("y", 5)))
+                "CDP OK\n" + cdpRun(wv, cmds).toString(1)
+            } catch (e: Exception) {
+                "CDP FAILED\n" + (e.message ?: e.toString())
+            }
+            runOnUiThread {
+                AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                    .setTitle("CDP test")
+                    .setMessage(text)
+                    .setPositiveButton("Copy") { _, _ -> copy(text) }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }.start()
+    }
+
     // ---------------- WebView ----------------
 
     // Mobile UA = system WebView UA without the "Build/..; wv" marker (same trick Fulguris uses)
     private fun mobileUa(): String {
-        return Regex(" Build/.+; wv").replace(WebSettings.getDefaultUserAgent(this), "")
+        // also drop "Version/4.0" - real Chrome never has it, WebView does (Google login checks for it)
+        return Regex(" Build/.+; wv").replace(WebSettings.getDefaultUserAgent(this), "").replace(" Version/4.0", "")
     }
 
     // Applies the tab's desktop/mobile state (UA + viewport mode). The meta viewport itself is injected by applyDesktopView().
@@ -767,6 +861,13 @@ class MainActivity : Activity() {
         s.javaScriptCanOpenWindowsAutomatically = true
         s.mediaPlaybackRequiresUserGesture = false
         s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        // WebView sends "X-Requested-With: <app package>" on every request; Google uses it to block sign-in. Empty list = never send it.
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(s, emptySet())
+            }
+        } catch (e: Exception) {
+        }
 
         if (isHome) {
             s.useWideViewPort = false
@@ -1185,6 +1286,36 @@ class MainActivity : Activity() {
             latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
             val host = try { Uri.parse(pageUrl).host } catch (e: Exception) { null }
             return isXHost(host) || host == "web.telegram.org"
+        }
+
+        // ---- CDP: trusted input (isTrusted = true) for THIS tab only, x.com / telegram web only, input-type commands only ----
+        @JavascriptInterface
+        fun cdpBatch(json: String): String {
+            if (!cdpEnabled()) return "{\"error\":\"cdp off\"}"
+            if (!tgPageOk()) return "{\"error\":\"page not allowed\"}"
+            return try {
+                val cmds = JSONArray(json)
+                if (cmds.length() > 120) return "{\"error\":\"too many commands\"}"
+                for (i in 0 until cmds.length()) {
+                    if (!CDP_ALLOW.contains(cmds.getJSONObject(i).optString("method"))) return "{\"error\":\"method not allowed\"}"
+                }
+                cdpRun(owner, cmds).toString()
+            } catch (e: Exception) {
+                JSONObject().put("error", e.message ?: e.toString()).toString()
+            }
+        }
+
+        @JavascriptInterface
+        fun cdpOn(): Boolean = cdpEnabled()
+
+        @JavascriptInterface
+        fun cdp(method: String, paramsJson: String): String {
+            return try {
+                val c = JSONObject().put("method", method).put("params", JSONObject(if (paramsJson.isEmpty()) "{}" else paramsJson))
+                cdpBatch(JSONArray().put(c).toString())
+            } catch (e: Exception) {
+                JSONObject().put("error", e.message ?: e.toString()).toString()
+            }
         }
 
         @JavascriptInterface
