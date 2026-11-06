@@ -576,7 +576,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             false
         }
-        return auto || tgRunning()
+        return auto || tgRunning() || jobRunning("fjob") || jobRunning("ujob")
     }
 
     // a web.telegram.org tab (Telegram engines run there)
@@ -984,6 +984,42 @@ class MainActivity : Activity() {
             runOnUiThread { openXUrlUi(url) }
         }
 
+        // Telegram engines (Engine screen: TG Engage / TG Sweep): switch to the Telegram tab (or open it), read the job, stop it
+        @JavascriptInterface
+        fun openTelegram() {
+            runOnUiThread {
+                val i = tabs.indexOfFirst { isTgWebTab(it) }
+                if (i >= 0) switchTo(i) else newTab(false, TG_URL)
+            }
+        }
+
+        @JavascriptInterface
+        fun tgJobGet(): String = tgJobGetStr()
+
+        // Follow engine / Auto Unfollow jobs ("fjob" / "ujob"); the Z1 app starts them, x.js runs them on x.com
+        @JavascriptInterface
+        fun jobGet(key: String): String = if (jobKeyOk(key)) jobGetStr(key) else "{}"
+
+        @JavascriptInterface
+        fun jobStart(key: String, json: String) {
+            if (jobKeyOk(key)) jobPatchKey(key, json, true)
+        }
+
+        @JavascriptInterface
+        fun jobPatch(key: String, json: String) {
+            if (jobKeyOk(key)) jobPatchKey(key, json, false)
+        }
+
+        @JavascriptInterface
+        fun jobStop(key: String) {
+            if (jobKeyOk(key)) jobPatchKey(key, "{\"running\":false,\"status\":\"stopped\",\"msg\":\"Stopped\",\"waitUntil\":0}", false)
+        }
+
+        @JavascriptInterface
+        fun tgJobStop() {
+            tgJobPatch("{\"running\":false,\"phase\":\"DONE\",\"msg\":\"Stopped\",\"waitUntil\":0}", false)
+        }
+
         @JavascriptInterface
         fun fetchUsername(force: Boolean, callbackId: String) {
             runOnUiThread { startUserFetch(force) { json -> deliver(owner, callbackId, json) } }
@@ -1035,21 +1071,31 @@ class MainActivity : Activity() {
     // running=true keeps the X tab and the Telegram tab alive in the background, same as the SEA/FED AUTO mode.
     private val tgLock = Any()
 
-    private fun tgJobGetStr(): String = synchronized(tgLock) { engPrefs().getString("tgjob", "{}") ?: "{}" }
+    // Same store for the Follow engine ("fjob") and Auto Unfollow ("ujob"): jobGetStr(key) / jobPatchKey(key, ...)
+    private fun jobKeyOk(k: String) = k == "tgjob" || k == "fjob" || k == "ujob"
 
-    private fun tgRunning(): Boolean {
+    private fun jobGetStr(key: String): String = synchronized(tgLock) { engPrefs().getString(key, "{}") ?: "{}" }
+
+    private fun jobRunning(key: String): Boolean {
         return try {
-            JSONObject(tgJobGetStr()).optBoolean("running", false)
+            JSONObject(jobGetStr(key)).optBoolean("running", false)
         } catch (e: Exception) {
             false
         }
     }
 
-    private fun tgJobPatch(patchJson: String, replace: Boolean) {
+    private fun tgJobGetStr(): String = jobGetStr("tgjob")
+
+    private fun tgRunning(): Boolean = jobRunning("tgjob")
+
+    private fun tgJobPatch(patchJson: String, replace: Boolean) = jobPatchKey("tgjob", patchJson, replace)
+
+    private fun jobPatchKey(key: String, patchJson: String, replace: Boolean) {
+        if (!jobKeyOk(key)) return
         var touchRun = false
         synchronized(tgLock) {
             try {
-                val base = if (replace) JSONObject() else JSONObject(engPrefs().getString("tgjob", "{}") ?: "{}")
+                val base = if (replace) JSONObject() else JSONObject(engPrefs().getString(key, "{}") ?: "{}")
                 val p = JSONObject(patchJson)
                 touchRun = p.has("running")
                 val keys = p.keys()
@@ -1058,7 +1104,7 @@ class MainActivity : Activity() {
                     if (p.isNull(k)) base.remove(k) else base.put(k, p.get(k))
                 }
                 val out = base.toString()
-                if (out.length <= 400000) engPrefs().edit().putString("tgjob", out).apply()
+                if (out.length <= 400000) engPrefs().edit().putString(key, out).apply()
             } catch (e: Exception) {
             }
         }
@@ -1075,7 +1121,8 @@ class MainActivity : Activity() {
         "seaKw", "seaQs", "seaQActive", "seaRes", "seaUrl",
         "seaEs2", "seaEs2Pct", "fedEs2", "fedEs2Pct",
         "kwAuto", "kwCustomOn", "kwCustom", "kwMode", "blackList", "whiteList",
-        "tgLike", "tgLikePct")
+        "tgLike", "tgLikePct",
+        "folSpeed", "folMin", "folMax", "unfMode", "unfLimit", "unfMin", "unfMax", "unfBreakEvery", "unfBreakSec")
 
     private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
 
@@ -1142,6 +1189,15 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun getTgJob(): String = tgJobGetStr()
+
+        // fjob / ujob for x.js (x.com pages only)
+        @JavascriptInterface
+        fun getJob(key: String): String = if (jobKeyOk(key)) jobGetStr(key) else "{}"
+
+        @JavascriptInterface
+        fun patchJob(key: String, json: String) {
+            if (jobKeyOk(key) && tgPageOk()) jobPatchKey(key, json, false)
+        }
 
         @JavascriptInterface
         fun startTgJob(json: String) {
