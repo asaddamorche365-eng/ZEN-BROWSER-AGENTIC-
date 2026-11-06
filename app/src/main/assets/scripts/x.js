@@ -27,7 +27,10 @@
     // Account list (extension's Blacklist): never comment on these accounts. Array of lowercase handles (no @).
     blackList: [], whiteList: [],
     // Telegram engines (tg.js panel): like before comment, null = use the shared Like setting
-    tgLike: null, tgLikePct: null };
+    tgLike: null, tgLikePct: null,
+    // Follow engine + Auto Unfollow settings (Engine screen); the run itself lives in the app job store (fjob / ujob)
+    folSpeed: 'safe', folMin: 120, folMax: 240,
+    unfMode: 'nonfollowers', unfLimit: 0, unfMin: 15, unfMax: 20, unfBreakEvery: 15, unfBreakSec: 120 };
   // settings + runtime toggles live in the app (SharedPreferences) so the Engine settings page and this panel share them
   function loadCfg() {
     var c = {};
@@ -907,6 +910,194 @@
     }
   }
 
+  // ---------------- FOLLOW engine + AUTO UNFOLLOW (port of the extension's eng_follow.js + eng_unfollow.js) ----------------
+  // Jobs live in the app (fjob / ujob, started from the Engine screen), so a page reload never loses the place.
+  //   FOLLOW  : fjob.queue[] of usernames, fjob.idx. Opens x.com/<user>, clicks Follow, confirms it flipped, waits the gap, next profile.
+  //   UNFOLLOW: ujob. Runs on x.com/<you>/following: clicks Following -> confirm on each row (non-followers only, or everyone), gap + breaks.
+  var folBusy = false, unfBusy = false;
+  function jGet(name) { try { return JSON.parse((window.ZenEng && window.ZenEng.getJob && window.ZenEng.getJob(name)) || '{}') || {}; } catch (e) { return {}; } }
+  function jPatch(name, p) { try { if (window.ZenEng && window.ZenEng.patchJob) window.ZenEng.patchJob(name, JSON.stringify(p)); } catch (e) {} }
+  var FU_LIMIT_RE = /(daily limit|over the (daily )?limit|reached (the |your )?(daily )?limit|rate limit|limit (on|for) (following|unfollowing)|unable to (follow|unfollow)|too many (follows|requests)|temporarily (restricted|limited|locked)|(account|profile) (has been )?(locked|restricted|limited)|automated behavio|suspicious activity)/i;
+  function fuLimitText() {
+    var els = $$('[data-testid="toast"], [role="alert"], [aria-live="assertive"], [role="alertdialog"], [data-testid="sheetDialog"], [data-testid="confirmationSheetDialog"]');
+    for (var i = 0; i < els.length; i++) { var t = String(els[i].innerText || els[i].textContent || '').slice(0, 400); if (t && FU_LIMIT_RE.test(t)) return t.trim().slice(0, 160); }
+    return '';
+  }
+  function fuFinish(name, j, msg, kind) {
+    jPatch(name, { running: false, status: 'done', msg: msg, waitUntil: 0, finishedAt: Date.now() });
+    setStat(msg); toast((name === 'fjob' ? 'FOLLOW: ' : 'UNFOLLOW: ') + msg, kind || 'success');
+  }
+  function folButton() {
+    var b = document.querySelector('button[data-testid$="-follow"], [role="button"][data-testid$="-follow"]'); if (b) return b;
+    var all = $$('div[data-testid="placementTracking"] button, main button, main [role="button"]');
+    for (var i = 0; i < all.length; i++) if (String(all[i].textContent || '').trim().toLowerCase() === 'follow') return all[i];
+    return null;
+  }
+  function folDoneOrUnavailable() {   // already following / unblock / unmute / account gone: nothing to do (not a failure)
+    var bs = $$('button, [role="button"]');
+    for (var i = 0; i < bs.length; i++) { var t = String(bs[i].textContent || '').trim().toLowerCase(); if (t === 'following' || t === 'unblock' || t === 'unmute') return true; }
+    return /this account doesn.?t exist|account suspended/i.test(document.body ? document.body.innerText || '' : '');
+  }
+  function profileOf(u) { var m = /^\/([A-Za-z0-9_]{1,15})\/?$/.exec(location.pathname); return !!m && m[1].toLowerCase() === String(u).toLowerCase(); }
+  async function folWork(j, u) {
+    folBusy = true; var outcome = 'failed', why = '';
+    var wanted = function () { var q = jGet('fjob'); return !!q.running && (q.queue || [])[q.idx || 0] === u; };
+    try {
+      jPatch('fjob', { msg: 'Following @' + u }); setStat('FOLLOW - @' + u);
+      await sleep(rnd(1500, 2500)); if (!wanted()) return;
+      if (folDoneOrUnavailable()) outcome = 'already';
+      else {
+        var btn = await waitFor(function () { return folButton(); }, 4000);
+        if (!btn) { outcome = 'failed'; why = 'No Follow button'; }
+        else if (folDoneOrUnavailable()) outcome = 'already';
+        else {
+          try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}
+          await sleep(rnd(200, 500));
+          if (!wanted()) return;                       // last gate: Stop = never click Follow afterwards
+          await tap(btn);
+          var ok = await waitFor(function () {
+            var nb = folButton(); var t = nb ? String(nb.textContent || '').trim().toLowerCase() : '';
+            var any = $$('button, [role="button"]').some(function (b) { var x = String(b.textContent || '').trim().toLowerCase(); return x === 'following' || x === 'requested' || x === 'pending'; });
+            return (t === 'following' || t === 'requested' || t === 'pending' || any) ? true : null;
+          }, 3500);
+          if (ok) outcome = 'done'; else { outcome = 'failed'; why = fuLimitText() || 'Follow did not land'; }
+        }
+      }
+      var lim = outcome === 'failed' ? fuLimitText() : '';
+      await folAfter(u, outcome, why, lim);
+    } catch (e) { try { await folAfter(u, 'failed', String(e && e.message || e).slice(0, 80), ''); } catch (e2) {} }
+    finally { folBusy = false; }
+  }
+  async function folAfter(u, outcome, why, lim) {
+    var j = jGet('fjob'); if (!j.running || (j.queue || [])[j.idx || 0] !== u) return;
+    var now = Date.now(), okRes = outcome === 'done', failed = outcome === 'failed';
+    var p = { idx: (j.idx || 0) + 1, done: (j.done || 0) + (okRes ? 1 : 0), skipped: (j.skipped || 0) + (outcome === 'already' ? 1 : 0), failed: (j.failed || 0) + (failed ? 1 : 0),
+      consec: failed ? (j.consec || 0) + 1 : 0, last: { u: u, s: outcome, why: why || '', t: now }, msg: '', navAt: 0 };
+    if (okRes || outcome === 'already') p.followed = (j.followed || []).slice(-4999).concat(u);
+    if (failed) p.failedList = (j.failedList || []).slice(-499).concat(u);
+    var merged = Object.assign({}, j, p), end = '';
+    if (lim) end = 'X limit: ' + lim; else if (p.consec >= 5) end = 'Stopped: 5 follows failed in a row - try again later';
+    else if (p.idx >= (j.queue || []).length) end = 'Finished the list - ' + p.done + ' followed';
+    if (end) { jPatch('fjob', p); fuFinish('fjob', merged, end, lim || p.consec >= 5 ? 'error' : 'success'); return; }
+    var gap = outcome === 'already' ? rnd(1.5, 3) : (function () { var a = Number(j.gapMin) || 120, b = Number(j.gapMax) || 240; return a + Math.random() * Math.max(0, b - a); })();
+    p.waitUntil = now + Math.round(gap * 1000); p.stepAt = p.waitUntil; jPatch('fjob', p);
+  }
+  function folTick() {
+    if (folBusy) return;
+    var j = jGet('fjob'); if (!j.running) return;
+    var now = Date.now();
+    if (j.waitUntil && now < j.waitUntil) { setStat('FOLLOW - next in ' + Math.ceil((j.waitUntil - now) / 1000) + 's'); return; }
+    if (loginWall()) { fuFinish('fjob', j, 'X logged out - log in again', 'error'); return; }
+    var q = j.queue || [], idx = j.idx || 0;
+    while (idx < q.length && (j.followed || []).indexOf(q[idx]) >= 0) idx++;          // already followed in an earlier run
+    if (idx !== (j.idx || 0)) { jPatch('fjob', { idx: idx, skipped: (j.skipped || 0) + (idx - (j.idx || 0)) }); return; }
+    if (idx >= q.length) { fuFinish('fjob', j, 'Finished the list - ' + (j.done || 0) + ' followed'); return; }
+    var u = q[idx];
+    if (j.stepAt && now - j.stepAt > 90000 && !profileOf(u)) {   // the profile never opened (90 s): skip it
+      folBusy = true; folAfter(u, 'failed', 'Timed out', '').then(function () { folBusy = false; }, function () { folBusy = false; }); return;
+    }
+    if (profileOf(u)) { folWork(j, u); return; }
+    setStat('FOLLOW - opening @' + u);
+    if (!j.navAt || now - j.navAt > 30000) { jPatch('fjob', { navAt: now, stepAt: j.stepAt || now }); try { location.href = 'https://x.com/' + u; } catch (e) {} }
+  }
+
+  // ----- Auto Unfollow -----
+  var unfSeen = {};
+  function ucells() { return $$('[data-testid="UserCell"]'); }
+  function ucellUser(c) {
+    var a = c.querySelector('a[href^="/"]'), h = a ? a.getAttribute('href') : '', u = (h || '').replace('/', '');
+    return (!u || u === 'i' || u.indexOf('/') >= 0) ? null : u;
+  }
+  function ufollowingBtn(c) { var bs = $$('[role="button"]', c); for (var i = 0; i < bs.length; i++) if (String(bs[i].textContent || '').indexOf('Following') >= 0) return bs[i]; return null; }
+  function ufindCell(u) { u = String(u).toLowerCase(); var cs = ucells(); for (var i = 0; i < cs.length; i++) if ((ucellUser(cs[i]) || '').toLowerCase() === u) return cs[i]; return null; }
+  function onFollowingPage(h) { var m = /^\/([^/]+)\/following\/?$/i.exec(location.pathname); return !!m && m[1].toLowerCase() === String(h).toLowerCase(); }
+  async function unfollowUser(u) {   // -> {ok, attempted, strong}
+    var cell = ufindCell(u); if (!cell) return { ok: false, attempted: false };
+    var btn = ufollowingBtn(cell); if (!btn) return { ok: false, attempted: false };
+    try { cell.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
+    await sleep(rnd(250, 650));
+    await tap(btn);
+    var confirm = null;
+    for (var w = 0; w < 1800 && !confirm; w += 150) { await sleep(150); confirm = document.querySelector('[data-testid="confirmationSheetConfirm"]'); }
+    if (!confirm) return { ok: false, attempted: true, strong: fuLimitText() };
+    await sleep(rnd(300, 800)); await tap(confirm); await sleep(rnd(1000, 1900));
+    var after = ufindCell(u);
+    if (after && ufollowingBtn(after)) return { ok: false, attempted: true, strong: fuLimitText() };
+    return { ok: true, attempted: true };
+  }
+  async function unfPause(ms, label) {   // wait, wake early on Stop. false = stopped
+    var end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (!jGet('ujob').running) return false;
+      setStat(label + ' ' + Math.max(0, Math.ceil((end - Date.now()) / 1000)) + 's');
+      jPatch('ujob', { waitUntil: end, msg: label });
+      await sleep(Math.min(1000, Math.max(50, end - Date.now())));
+    }
+    jPatch('ujob', { waitUntil: 0 });
+    return true;
+  }
+  async function unfRun(j0) {
+    unfBusy = true;
+    var reason = 'Done';
+    try {
+      var j = jGet('ujob'), handle = String(j.handle || '').toLowerCase(), limit = Math.min(2000, Number(j.limit) || 2000);
+      var processed = {}, seen = {}, stall = 0, consec = 0, sinceBreak = 0, c = { u: j.unfollowed || 0, s: j.skipped || 0, f: j.failed || 0 };
+      var sync = function (msg) { jPatch('ujob', { unfollowed: c.u, skipped: c.s, failed: c.f, msg: msg || '' }); };
+      var collectSeen = function () { ucells().forEach(function (x) { var u = ucellUser(x); if (u) seen[u] = 1; }); };
+      setStat('UNFOLLOW - loading list'); sync('Loading your Following list'); await sleep(2500);
+      while (jGet('ujob').running) {
+        if (!onFollowingPage(handle)) { reason = 'Left the Following page'; break; }
+        var rows = ucells().map(function (x) { var u = ucellUser(x); return u ? { u: u, followsYou: String(x.textContent || '').indexOf('Follows you') >= 0, following: !!ufollowingBtn(x) } : null; })
+          .filter(function (r) { return r && !processed[r.u]; });
+        if (!rows.length) {
+          stall++; setStat('UNFOLLOW - scrolling (' + stall + '/10)'); collectSeen();
+          var before = Object.keys(seen).length; window.scrollBy(0, window.innerHeight * 1.5); await sleep(2500); collectSeen();
+          if (Object.keys(seen).length > before) { stall = 0; continue; }
+          if (stall >= 10) { window.scrollTo(0, document.documentElement.scrollHeight); await sleep(5000); var b2 = Object.keys(seen).length; collectSeen(); if (Object.keys(seen).length > b2) { stall = 0; continue; } break; }
+          continue;
+        }
+        stall = 0; var stop = false;
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          if (!onFollowingPage(handle)) break;
+          if (!jGet('ujob').running) { stop = true; reason = 'Stopped'; break; }
+          processed[row.u] = 1;
+          if (c.u >= limit) { reason = 'Target reached - ' + limit; stop = true; break; }
+          if (!row.following) continue;
+          if (row.u.toLowerCase() === handle) continue;                                  // never my own row
+          if (j.mode !== 'all' && row.followsYou) { c.s++; sync(); continue; }              // keep mutuals unless Everyone mode
+          setStat('UNFOLLOW - @' + row.u); sync('Unfollowing @' + row.u);
+          var r = await unfollowUser(row.u);
+          if (r.ok) { c.u++; consec = 0; sinceBreak++; sync(); }
+          else if (r.attempted) {
+            c.f++; consec++; sync();
+            if (r.strong) { reason = 'X limit: ' + r.strong; stop = true; break; }
+            if (consec >= 3) { reason = 'X refused 3 unfollows in a row - stopped. Try again later.'; stop = true; break; }
+          } else continue;                                                                    // row vanished before we got to it
+          if (c.u >= limit) { reason = 'Target reached - ' + limit; stop = true; break; }
+          if (j.breakEvery > 0 && sinceBreak >= j.breakEvery) { sinceBreak = 0; if (!(await unfPause((Number(j.breakSec) || 0) * 1000, 'Break'))) { reason = 'Stopped'; stop = true; break; } }
+          else if (!(await unfPause(Math.round(rnd(Number(j.minSec) || 15, Math.max(Number(j.minSec) || 15, Number(j.maxSec) || 20)) * 1000), 'Next in'))) { reason = 'Stopped'; stop = true; break; }
+        }
+        if (stop) break;
+      }
+      jPatch('ujob', { unfollowed: c.u, skipped: c.s, failed: c.f });
+    } catch (e) { reason = 'Stopped: ' + String(e && e.message || e).slice(0, 80); }
+    finally {
+      unfBusy = false;
+      var jj = jGet('ujob'); if (jj.running || reason !== 'Stopped') fuFinish('ujob', jj, reason, /limit|refused/i.test(reason) ? 'error' : 'success');
+    }
+  }
+  function unfTick() {
+    if (unfBusy) return;
+    var j = jGet('ujob'); if (!j.running) return;
+    var now = Date.now(), h = String(j.handle || '').replace(/^@/, '').toLowerCase();
+    if (!h) { fuFinish('ujob', j, 'Set My @handle in the Engine screen first', 'error'); return; }
+    if (loginWall()) { fuFinish('ujob', j, 'X logged out - log in again', 'error'); return; }
+    if (onFollowingPage(h)) { unfRun(j); return; }
+    setStat('UNFOLLOW - opening your Following list');
+    if (!j.navAt || now - j.navAt > 30000) { jPatch('ujob', { navAt: now }); try { location.href = 'https://x.com/' + h + '/following'; } catch (e) {} }
+  }
+
   // ---------------- auto loop ----------------
   function postIds() { var s = {}; articles().forEach(function (a) { var i = statusId(a); if (i) s[i] = 1; }); return s; }
   async function scrollDown() {
@@ -993,7 +1184,7 @@
     if (!/\/compose\/|\/status\//.test(location.pathname) && !loginWall()) goodUrl = location.href;
     if (es1Busy) return;   // Extra Safety 1 cool-down routine is running
     if (es2Back && Date.now() - es2Back.ts < 240000) return;   // Extra Safety 2 detour: do not touch the page
-    try { tgTick(); } catch (e) {}
+    try { tgTick(); if (!tgGet().running) { folTick(); unfTick(); } } catch (e) {}
     var m = curMode();
     if (m !== lastMode) { teardown(); lastMode = m; if (m) toast(m + ' engine ON — buttons appear on posts', 'success'); }
     if (!m) return;
@@ -1022,8 +1213,14 @@
       '<div data-act="auto" style="text-align:center;padding:12px 0;border-radius:12px;font-weight:800;background:' + (cfg.auto ? '#b91c1c' : '#6d28d9') + ';margin-bottom:8px">' + (cfg.auto ? 'STOP' : 'START') + '</div>' +
       '<div data-act="settings" style="text-align:center;padding:8px 0;border-radius:10px;font-size:12px;border:1px solid #3a3260;color:#c4b5fd">Settings</div>';
   }
+  function fuPanelLine() {
+    var f = jGet('fjob'), u = jGet('ujob'), out = '';
+    if (f.running) out += '<div style="border:1px solid #15803d;border-radius:10px;padding:8px;margin-bottom:8px;font-size:12px;color:#bbf7d0"><b>FOLLOW</b> running · ' + (f.done || 0) + ' followed · ' + (f.skipped || 0) + ' skipped · ' + (f.failed || 0) + ' failed · ' + (f.idx || 0) + ' / ' + (f.queue || []).length + '<div data-act="fustop" data-v="fjob" style="text-align:center;padding:8px 0;margin-top:6px;border-radius:8px;font-weight:800;background:#b91c1c;color:#fff">STOP FOLLOW</div></div>';
+    if (u.running) out += '<div style="border:1px solid #b45309;border-radius:10px;padding:8px;margin-bottom:8px;font-size:12px;color:#fde68a"><b>UNFOLLOW</b> running · ' + (u.unfollowed || 0) + (u.limit ? ' / ' + u.limit : '') + ' unfollowed · ' + (u.skipped || 0) + ' skipped · ' + (u.failed || 0) + ' failed<div data-act="fustop" data-v="ujob" style="text-align:center;padding:8px 0;margin-top:6px;border-radius:8px;font-weight:800;background:#b91c1c;color:#fff">STOP UNFOLLOW</div></div>';
+    return out;
+  }
   function tgPanelLine() {
-    var j = tgGet(); if (!j.running) return '';
+    var j = tgGet(); if (!j.running) return fuPanelLine();
     var tot = j.mode === 'sweep' ? ' / ' + (j.queue || []).length : '';
     return '<div style="border:1px solid #1d4ed8;border-radius:10px;padding:8px;margin-bottom:8px;font-size:12px;color:#bfdbfe"><b>' + tgLabel(j) + '</b> running · ' + (j.done || 0) + tot + ' done · ' + (j.failed || 0) + ' failed · ' + (j.skipped || 0) + ' skipped' +
       '<div data-act="tgstop" style="text-align:center;padding:8px 0;margin-top:6px;border-radius:8px;font-weight:800;background:#b91c1c;color:#fff">STOP TELEGRAM RUN</div></div>';
@@ -1033,6 +1230,7 @@
     var act = t.getAttribute('data-act');
     if (act === 'sea' || act === 'fed') { var p = {}; p[act] = !cfg[act]; patchCfg(p); lastMode = '#'; scan(); }
     else if (act === 'tgstop') { tgStop(); }
+    else if (act === 'fustop') { var nm = t.getAttribute('data-v') === 'ujob' ? 'ujob' : 'fjob'; jPatch(nm, { running: false, status: 'stopped', msg: 'Stopped', waitUntil: 0 }); setStat('Stopped'); }
     else if (act === 'auto') {
       if (tgGet().running) { toast('A Telegram run is active - stop it first', 'warn'); }
       else if (cfg.auto) { patchCfg({ auto: false }); setStat('Stopping'); }
