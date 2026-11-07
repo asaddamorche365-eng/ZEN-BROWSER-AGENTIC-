@@ -569,6 +569,15 @@
       try { window.ZenEng.gen(buildPrompt(post, tone, eng), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
     });
   }
+  function genRaw(prompt) {   // plain AI text (used by Autopilot to write posts)
+    return new Promise(function (resolve, reject) {
+      if (!window.ZenEng) { reject(new Error('Bridge missing (update app)')); return; }
+      var id = 'g' + (++cbN), done = false;
+      var to = setTimeout(function () { if (!done) { done = true; delete cbs[id]; reject(new Error('AI timeout')); } }, 45000);
+      cbs[id] = function (r) { if (done) return; done = true; clearTimeout(to); if (r && r.ok && r.text) resolve(r.text); else reject(new Error((r && r.error) || 'AI failed')); };
+      try { window.ZenEng.gen(String(prompt), id); } catch (e) { done = true; clearTimeout(to); reject(e); }
+    });
+  }
   // ---- timing: copy of the extension's Timing Hub (comment group) ----
   // CLASSIC  = Reply Speed (Normal 4-7 s / Fast 2-3.5 s / Custom gap) + "comment after like" delay.
   // ADVANCED = FLASH / FLASH LITE / FAST / SLOW / CUSTOM (per post or total time). Numbers are in seconds.
@@ -1265,6 +1274,9 @@
     renderPanel(); placeUi();
   }
 
+  // small API for pilot.js (Autopilot)
+  window.__ZAPI = { sleep: sleep, rnd: rnd, toast: toast, setStat: setStat, patchCfg: patchCfg, getCfg: loadCfg, ownHandle: ownHandle, tap: tap,
+    insertText: insertText, submitBtn: submitBtn, loginWall: loginWall, genRaw: genRaw };
   function boot() {
     es1Check();
     buildPanel();
