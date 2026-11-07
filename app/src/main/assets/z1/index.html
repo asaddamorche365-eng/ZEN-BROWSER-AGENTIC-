@@ -17260,7 +17260,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
     seaEs2: false, seaEs2Pct: 30, fedEs2: false, fedEs2Pct: 30, tgLike: null, tgLikePct: null,
     folSpeed: 'safe', folMin: 120, folMax: 240, unfMode: 'nonfollowers', unfLimit: 0, unfMin: 15, unfMax: 20, unfBreakEvery: 15, unfBreakSec: 120 };
   var cfg = {}, view = 'home', qShown = 3;
-  var VIEW_TITLE = { timing: 'Timing', fed: 'FED Engine', sea: 'Search Engine', tgeng: 'TG Engage', tgsw: 'TG Sweep', fol: 'Follow Engine', unf: 'Auto Unfollow' };
+  var VIEW_TITLE = { timing: 'Timing', fed: 'FED Engine', sea: 'Search Engine', tgeng: 'TG Engage', tgsw: 'TG Sweep', fol: 'Follow Engine', unf: 'Auto Unfollow', pilot: 'Autopilot' };
   function loadCfg() {
     var c = {}; try { c = JSON.parse(B.engCfgGet() || '{}') || {}; } catch (e) {}
     cfg = {}; for (var k in DEF) cfg[k] = (k in c) ? c[k] : DEF[k];
@@ -17532,6 +17532,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
   function fuBusyOther() {
     if (cfg.auto) return 'Stop AUTO mode (the Z button in X) first';
     if (tgJob().running) return 'A Telegram run is active - stop it first';
+    if (fuJob('pjob').running) return 'Autopilot is running - stop it first';
     if (fuJob('fjob').running) return 'Follow is already running';
     if (fuJob('ujob').running) return 'Auto Unfollow is already running';
     return '';
@@ -17686,6 +17687,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
     var a = $('fu-stat-f'), b = $('fu-stat-u');
     if (a) { var h1 = fuStatHtml('fjob'); if (a.innerHTML !== h1) a.innerHTML = h1; }
     if (b) { var h2 = fuStatHtml('ujob'); if (b.innerHTML !== h2) b.innerHTML = h2; }
+    var pl = $('pl-stat'); if (pl) { var h3 = pilotStatHtml(); if (pl.innerHTML !== h3) pl.innerHTML = h3; }
   }, 1500);
 
   // ----- home (agent list) -----
@@ -17695,6 +17697,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
   }
   function vHome() {
     return '<div class="zp-hero"><div class="t">Yo, it\'s me your time saviour</div><div class="s">Choose one of the engines to do your work</div></div>' +
+      agentCard('pilot', 'Autopilot', 'Acts like a person: scroll, post, search, engage, follow, rest', fuJob('pjob').running ? 'ON' : 'OFF') +
       agentCard('timing', 'Timing', 'Speed &amp; delays for every engine, in one place', tLabel().split(' · ')[0]) +
       agentCard('fed', 'FED Engine', 'Reply to posts on your home feed', cfg.fed ? 'ON' : 'OFF') +
       agentCard('sea', 'Search Engine', 'Search a keyword, reply to the results', cfg.sea ? 'ON' : 'OFF') +
@@ -17706,12 +17709,95 @@ function zrcMakeHud(host, title, withCmd, opts) {
       row('My @handle', 'optional, detected automatically. Own posts are always skipped.', '<input class="zp-in" id="f-myHandle" style="width:140px" value="' + esc(cfg.myHandle) + '">') + '</div>' +
       '<div class="zp-note">Start / Stop is the floating <b>Z</b> button inside X. Tone, grammar, big reply and style are in the Settings sheet.</div>';
   }
+  // ----- AUTOPILOT (human-like routine: the run itself lives in x.js / pilot.js, state in job store "pjob") -----
+  IC.pilot = '<svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.2L18.5 21 12 16.8 5.5 21l2-7.8L2 9h7z"/></svg>';
+  var PSTEPS = [['browse', 'Scroll feed', 'time'], ['feed', 'Engage on feed (FED)', 'count'], ['search', 'Search + engage (SEA)', 'count'], ['profile', 'Visit own profile', 'time'], ['post', 'Write a post', ''], ['follow', 'Follow people', '']];
+  var PDEF = { mode: 'brain', orderStr: 'browse,feed,profile,post,search,follow',
+    steps: { browse: { on: true, w: 3, min: 3, max: 8, skip: 0 }, feed: { on: true, w: 3, cnt: [5, 12], skip: 0 }, search: { on: true, w: 2, cnt: [4, 10], skip: 10 },
+      profile: { on: true, w: 1, min: 1, max: 3, skip: 20 }, post: { on: false, w: 1, skip: 30 }, follow: { on: true, w: 2, skip: 0 } },
+    followCap: 25, dayFollowMax: 80, followChunk: [5, 10], followGap: [120, 240], restHours: [3, 4], sessionMin: [40, 90], breakMin: [10, 30],
+    quietOn: false, quietFrom: 1, quietTo: 7, postsPerDay: 2, postGapMin: 90, aiPosts: false, aiTopic: '', postList: '', queries: '' };
+  var pcfg = null;
+  function pclone(o) { return JSON.parse(JSON.stringify(o)); }
+  function pmerge(d, v) { if (v === undefined || v === null) return pclone(d); if (typeof d !== 'object' || d === null) return v; if (Array.isArray(d)) return Array.isArray(v) ? v : pclone(d); var o = {}; for (var k in d) o[k] = pmerge(d[k], v[k]); return o; }
+  function pload() { if (pcfg) return pcfg; var raw = null; try { raw = JSON.parse(localStorage.getItem('zl_pilotcfg') || 'null'); } catch (e) {} pcfg = pmerge(PDEF, raw); return pcfg; }
+  function psave() { try { localStorage.setItem('zl_pilotcfg', JSON.stringify(pcfg)); } catch (e) {} if (fuJob('pjob').running && B.jobPatch) { try { B.jobPatch('pjob', JSON.stringify({ cfg: pilotRunCfg() })); } catch (e) {} } }
+  function pget(path) { var o = pload(), a = path.split('.'); for (var i = 0; i < a.length; i++) { if (o == null) return undefined; o = o[a[i]]; } return o; }
+  function pset(path, v) { var o = pload(), a = path.split('.'); for (var i = 0; i < a.length - 1; i++) o = o[a[i]]; o[a[a.length - 1]] = v; psave(); }
+  function pnum(path, w) { return '<input class="zp-in sm" data-pk="' + path + '" type="number" min="0" value="' + esc(pget(path)) + '" style="width:' + (w || 62) + 'px">'; }
+  function ppair(path) { return pnum(path + '.0') + ' <span class="zp-note" style="display:inline">to</span> ' + pnum(path + '.1'); }
+  function pchk(path) { return '<label class="zp-sw"><input type="checkbox" data-pk="' + path + '"' + (pget(path) ? ' checked' : '') + '><i></i></label>'; }
+  function pilotRunCfg() {
+    var c = pclone(pload());
+    c.order = String(c.orderStr || '').split(/[\s,]+/).filter(function (x) { return x; });
+    c.queries = String(c.queries || '').split(/\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+    delete c.postList; delete c.orderStr; return c;
+  }
+  function pilotStatHtml() {
+    var j = fuJob('pjob');
+    if (!j.running) return '<div class="zp-row"><div class="l">STATUS<small>' + esc(j.status && j.msg ? 'Last run: ' + j.msg : 'autopilot is not running') + '</small></div><span class="zp-badge">IDLE</span></div>';
+    var rest = j.restUntil && j.restUntil > Date.now() ? ' - resting' : '';
+    return '<div class="zp-row"><div class="l">AUTOPILOT RUNNING<small>' + esc((j.phase ? '[' + j.phase + '] ' : '') + (j.msg || 'working') + rest) + '</small></div><span class="zp-badge on">ON</span></div>' +
+      '<div class="zp-note" style="margin-top:8px">Followed today <b>' + (j.followedToday || 0) + '</b> (this round <b>' + (j.cycleFollowed || 0) + '</b>) - posts today <b>' + (j.postsToday || 0) + '</b> - follow list left <b>' + (j.queue || []).length + '</b></div>';
+  }
+  function vPilot() {
+    var c = pload(), h = '';
+    h += '<div class="zp-card"><div class="zp-lbl">AUTOPILOT</div><div class="zp-note">Runs the engines like a person: scrolls the feed, opens your profile, posts, searches and engages, follows people, takes short breaks, and rests for hours after a follow limit. Every step, order, time and number below is yours to change.</div></div>' +
+      '<div class="zp-card" id="pl-stat">' + pilotStatHtml() + '</div>' +
+      '<div class="zp-card"><div style="display:flex;gap:8px"><button type="button" class="zp-chip gold" id="pl-start" style="flex:1">START</button><button type="button" class="zp-chip" id="pl-stop" style="flex:1">STOP</button></div></div>';
+    h += '<div class="zp-card"><div class="zp-lbl">HOW IT DECIDES</div>' +
+      row('Next step chosen by', 'Brain = offline rules (weights, what was not done for long, no repeats). Random = weights only. Fixed = your order.',
+        '<select class="zp-in" data-pk="mode" style="width:130px"><option value="brain"' + (c.mode === 'brain' ? ' selected' : '') + '>Brain</option><option value="random"' + (c.mode === 'random' ? ' selected' : '') + '>Random</option><option value="sequence"' + (c.mode === 'sequence' ? ' selected' : '') + '>Fixed order</option></select>') +
+      (c.mode === 'sequence' ? row('Order', 'comma separated: browse, feed, search, profile, post, follow', '<input class="zp-in" data-pk="orderStr" style="width:170px" value="' + esc(c.orderStr) + '">') : '') + '</div>';
+    PSTEPS.forEach(function (st) {
+      var id = st[0], kind = st[2];
+      h += '<div class="zp-card"><div class="zp-lbl">' + st[1].toUpperCase() + '</div>' + row('Use this step', '', pchk('steps.' + id + '.on')) +
+        row('Weight', 'higher = picked more often', pnum('steps.' + id + '.w')) + row('Skip chance %', 'sometimes just do not do it', pnum('steps.' + id + '.skip')) +
+        (kind === 'time' ? row('Minutes (min - max)', 'how long it stays on this step', pnum('steps.' + id + '.min') + ' ' + pnum('steps.' + id + '.max')) : '') +
+        (kind === 'count' ? row('Replies per round', 'min - max, then it moves on', ppair('steps.' + id + '.cnt')) : '') + '</div>';
+    });
+    h += '<div class="zp-card"><div class="zp-lbl">FOLLOW</div><div class="zp-note">Uses the list from the Follow Engine screen (file + typed names) when you press START.</div>' +
+      row('Follow limit per round', 'after this it rests', pnum('followCap')) + row('Max per day', '', pnum('dayFollowMax')) +
+      row('Follow in bunches of', 'min - max accounts', ppair('followChunk')) + row('Gap between follows (sec)', 'min - max', ppair('followGap')) +
+      row('Rest after limit (hours)', 'after the cap or an X limit message, then it follows again', ppair('restHours')) + '</div>';
+    h += '<div class="zp-card"><div class="zp-lbl">POSTS</div>' + row('Posts per day', 'max', pnum('postsPerDay')) + row('Gap between posts (min)', '', pnum('postGapMin')) +
+      row('Write with AI', 'needs your AI key in Profile', pchk('aiPosts')) + row('AI topic / niche', '', '<input class="zp-in" data-pk="aiTopic" style="width:150px" value="' + esc(c.aiTopic) + '">') +
+      '<div class="zp-note" style="margin-top:8px">Your own posts, one per line (used before AI):</div><textarea class="zp-in" data-pk="postList" rows="4" style="width:100%" spellcheck="false">' + esc(c.postList) + '</textarea></div>';
+    h += '<div class="zp-card"><div class="zp-lbl">SEARCH WORDS</div><div class="zp-note">One search per line. A random one is used each time.</div><textarea class="zp-in" data-pk="queries" rows="4" style="width:100%" spellcheck="false">' + esc(c.queries) + '</textarea></div>';
+    h += '<div class="zp-card"><div class="zp-lbl">SESSIONS &amp; SLEEP</div>' + row('Active for (min)', 'min - max, then a short break', ppair('sessionMin')) + row('Break (min)', 'min - max', ppair('breakMin')) +
+      row('Quiet hours', 'does nothing in this time', pchk('quietOn')) + row('From hour - to hour', '0 to 23, phone time', pnum('quietFrom') + ' ' + pnum('quietTo')) + '</div>';
+    h += '<div class="zp-note">Settings save by themselves. While it runs they apply from the next decision. Nothing here can promise X will never limit an account - lower numbers and longer rests are safer.</div>';
+    return h;
+  }
+  function pilotBind(el) {
+    [].forEach.call(el.querySelectorAll('[data-pk]'), function (e) {
+      e.onchange = function () {
+        var k = e.getAttribute('data-pk'), v;
+        if (e.type === 'checkbox') v = e.checked; else if (e.type === 'number') { v = Number(e.value); if (!isFinite(v) || v < 0) return; } else v = e.value;
+        pset(k, v); if (k === 'mode') { render(); }
+      };
+    });
+    var st = el.querySelector('#pl-start'), sp = el.querySelector('#pl-stop');
+    if (st) st.onclick = pilotStart;
+    if (sp) sp.onclick = function () { if (B.jobStop) { B.jobStop('pjob'); say('Autopilot stopped'); } render(); };
+  }
+  function pilotStart() {
+    var why = fuBusyOther(); if (why) { say(why, 'error'); return; }
+    if (!B.jobStart) { say('Update the app to use Autopilot', 'error'); return; }
+    var c = pilotRunCfg(), pc = pload();
+    var q = folAll(), pq = String(pc.postList || '').split(/\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+    var any = ['browse', 'feed', 'search', 'profile', 'post', 'follow'].some(function (k) { return c.steps[k].on; }); if (!any) { say('Turn on at least one step', 'error'); return; }
+    B.jobStart('pjob', JSON.stringify({ running: true, status: 'running', cfg: c, queue: q, postQueue: pq, last: {}, lastPhase: '', phase: '', followedToday: 0, cycleFollowed: 0, postsToday: 0, dayKey: '',
+      sessionStart: 0, restUntil: 0, startedAt: Date.now(), msg: 'Starting' }));
+    say('Autopilot started'); goX('https://x.com/home');
+  }
   function render() {
     var el = $('engine-screen'); if (!el) return;
     loadCfg();
-    var body = view === 'timing' ? vTiming() : view === 'fed' ? vFed() : view === 'sea' ? vSea() : view === 'tgeng' ? vTgEng() : view === 'tgsw' ? vTgSw() : view === 'fol' ? vFol() : view === 'unf' ? vUnf() : vHome();
+    var body = view === 'timing' ? vTiming() : view === 'fed' ? vFed() : view === 'sea' ? vSea() : view === 'tgeng' ? vTgEng() : view === 'tgsw' ? vTgSw() : view === 'fol' ? vFol() : view === 'unf' ? vUnf() : view === 'pilot' ? vPilot() : vHome();
     el.innerHTML = '<div class="zp-wrap">' + (view === 'home' ? '<div class="zp-h">Engine</div><div class="zp-sub">FED · SEA · TG · Follow · Unfollow · Timing — keys &amp; profile are in Menu → Profile</div>' : '') + body + '</div>';
     wire(el);
+    if (view === 'pilot') pilotBind(el);
     if (view === 'sea') renderQs();
   }
   function bindCheck(el, id, key, after) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.checked; save(p); if (after) after(); }; }
