@@ -178,6 +178,7 @@ class MainActivity : Activity() {
             UserScript("scripts/all.js", setOf("*")),
             UserScript("scripts/cdp.js", setOf("https://x.com", "https://twitter.com", "https://web.telegram.org")),
             UserScript("scripts/x.js", setOf("https://x.com", "https://twitter.com")),
+            UserScript("scripts/pilot.js", setOf("https://x.com", "https://twitter.com")),
             UserScript("scripts/tg.js", setOf("https://web.telegram.org")),
             UserScript("scripts/z1.js", setOf("${z1.scheme}://${z1.host}"))
         )
@@ -587,7 +588,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             false
         }
-        return auto || tgRunning() || jobRunning("fjob") || jobRunning("ujob")
+        return auto || tgRunning() || jobRunning("fjob") || jobRunning("ujob") || jobRunning("pjob")
     }
 
     // a web.telegram.org tab (Telegram engines run there)
@@ -1173,7 +1174,7 @@ class MainActivity : Activity() {
     private val tgLock = Any()
 
     // Same store for the Follow engine ("fjob") and Auto Unfollow ("ujob"): jobGetStr(key) / jobPatchKey(key, ...)
-    private fun jobKeyOk(k: String) = k == "tgjob" || k == "fjob" || k == "ujob"
+    private fun jobKeyOk(k: String) = k == "tgjob" || k == "fjob" || k == "ujob" || k == "pjob"
 
     private fun jobGetStr(key: String): String = synchronized(tgLock) { engPrefs().getString(key, "{}") ?: "{}" }
 
