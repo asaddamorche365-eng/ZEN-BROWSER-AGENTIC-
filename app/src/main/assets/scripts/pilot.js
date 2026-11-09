@@ -6,7 +6,14 @@
   if (window.top !== window || window.__ZPILOT) return;
   window.__ZPILOT = 1;
 
-  var KEY = 'pjob', busy = false, lastMsg = '', lastMsgAt = 0;
+  var KEY = 'pjob', busy = false, lastMsg = '', lastMsgAt = 0, SPD = 1;
+  // Speed control (like the other engines): slow / normal / fast / custom multiplier for every wait and gap Autopilot makes itself
+  function speedOf(c) {
+    var m = c.speed === 'slow' ? 1.7 : c.speed === 'fast' ? 0.6 : c.speed === 'custom' ? (Number(c.speedMul) || 1) : 1;
+    return Math.max(0.3, Math.min(4, m));
+  }
+  function sl(a, b) { return sleep(rnd(a, b) * SPD); }
+  function say(text, base, look) { var a = api(); if (a && a.cursorSay) a.cursorSay(text, base, look); }
   var STEPS = ['browse', 'feed', 'search', 'profile', 'post', 'follow'];
   function api() { return window.__ZAPI || null; }
   function now() { return Date.now(); }
@@ -84,17 +91,19 @@
     var steps = ri(9, 16), done = 0;
     for (var i = 1; i <= steps; i++) {
       var x = i / steps, e = x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2, d = px * e - done; done = px * e;
-      window.scrollBy({ top: d, behavior: 'instant' }); await sleep(rnd(35, 90));
+      window.scrollBy({ top: d, behavior: 'instant' }); await sl(35, 90);
     }
   }
   async function humanScroll() {
     var r = Math.random(), vh = window.innerHeight || 700;
-    if (r < 0.10) { await smoothBy(-vh * rnd(0.2, 0.6)); await sleep(rnd(1500, 4000)); }          // scroll back up a bit
-    else if (r < 0.20) { await sleep(rnd(6000, 14000)); }                                           // stop and "read"
-    else { await smoothBy(vh * rnd(0.4, 1.3)); await sleep(rnd(1200, 5200)); }
+    var a = api(); if (a && a.cursorWander && Math.random() < 0.25) a.cursorWander();               // finger drifts around
+    if (r < 0.10) { await smoothBy(-vh * rnd(0.2, 0.6)); await sl(1500, 4000); }                    // scroll back up a bit
+    else if (r < 0.20) { say('READING A POST...', 'read'); await sl(6000, 14000); }                  // stop and "read"
+    else { await smoothBy(vh * rnd(0.4, 1.3)); await sl(1200, 5200); }
   }
-  function setMsg(text) {
+  function setMsg(text, cs, cb, cl) {
     var a = api(); if (a) a.setStat('PILOT - ' + text);
+    if (cs) say(cs, cb, cl);
     var t = now(); if (text !== lastMsg && t - lastMsgAt > 4000) { lastMsg = text; lastMsgAt = t; jp({ msg: text }); }
   }
   function endPhase(j, name, extra) {
@@ -120,10 +129,10 @@
   // ---------------- phases ----------------
   async function runBrowse(j, c, t, where) {
     if (where === 'home' ? !isHome() : location.pathname.toLowerCase() !== '/' + String(where).toLowerCase()) {
-      setMsg(where === 'home' ? 'opening feed' : 'opening own profile'); nav(where === 'home' ? 'https://x.com/home' : 'https://x.com/' + where, j); return;
+      setMsg(where === 'home' ? 'opening feed' : 'opening own profile', where === 'home' ? 'OPENING THE FEED' : 'GOING TO MY PROFILE', 'search'); nav(where === 'home' ? 'https://x.com/home' : 'https://x.com/' + where, j); return;
     }
     if (t >= j.phaseEnd) { endPhase(j, where === 'home' ? 'browse' : 'profile'); return; }
-    setMsg((where === 'home' ? 'scrolling feed' : 'on own profile') + ' - ' + Math.max(0, Math.round((j.phaseEnd - t) / 1000)) + 's left');
+    setMsg((where === 'home' ? 'scrolling feed' : 'on own profile') + ' - ' + Math.max(0, Math.round((j.phaseEnd - t) / 1000)) + 's left', where === 'home' ? 'SCROLLING THE FEED' : 'LOOKING AT MY POSTS', where === 'home' ? 'scroll' : 'read');
     await humanScroll();
   }
   async function runEngine(j, c, t, eng) {
@@ -136,10 +145,11 @@
         var qs = c.queries || [], q = qs[ri(0, qs.length - 1)] || '', url = 'https://x.com/search?q=' + encodeURIComponent(q) + '&src=typed_query&f=live';
         p.sea = true; p.seaMax = n; p.seaUrl = url; jp({ curUrl: url });
       }
+      say(eng === 'FED' ? "LET'S ENGAGE ON FEED" : "LET'S SEARCH POSTS", 'search');
       a.patchCfg(p); jp({ eStarted: t, engOwned: true, navAt: 0, phaseEnd: Math.max(j.phaseEnd || 0, t + 20 * 60000) });
       return;
     }
-    if (!onPage) { setMsg(eng === 'FED' ? 'opening feed' : 'opening search'); nav(eng === 'FED' ? 'https://x.com/home' : (j.curUrl || 'https://x.com/search?q=gm&f=live'), j); return; }
+    if (!onPage) { setMsg(eng === 'FED' ? 'opening feed' : 'opening search', eng === 'FED' ? 'OPENING THE FEED' : 'OPENING SEARCH', 'search'); nav(eng === 'FED' ? 'https://x.com/home' : (j.curUrl || 'https://x.com/search?q=gm&f=live'), j); return; }
     var cfg = a.getCfg();
     if ((!cfg.auto && t - j.eStarted > 10000) || t >= j.phaseEnd) { a.patchCfg({ fed: false, sea: false, auto: false }); endPhase(j, name, { engOwned: false }); return; }
     // the engine itself shows its own live status in the X panel
@@ -147,15 +157,15 @@
   async function runPost(j, c, t) {
     var a = api();
     if (j.postGuard && t - j.postGuard < 300000) { endPhase(j, 'post'); return; }            // one try per phase, never twice
-    if (!isHome()) { setMsg('opening feed to post'); nav('https://x.com/home', j); return; }
+    if (!isHome()) { setMsg('opening feed to post', 'OPENING THE FEED', 'search'); nav('https://x.com/home', j); return; }
     if (t - j.phaseStart > 60000) { endPhase(j, 'post'); return; }
     var ed = document.querySelector('[data-testid="tweetTextarea_0"]');
     if (!ed) {
       var fab = document.querySelector('[data-testid="FloatingActionButton_Tweet"],[data-testid="SideNav_NewTweet_Button"],a[href="/compose/post"]');
-      if (fab) { setMsg('opening composer'); await a.tap(fab); await sleep(rnd(1500, 2500)); }
+      if (fab) { setMsg('opening composer', 'OPENING THE COMPOSER', 'comment'); await a.tap(fab); await sl(1500, 2500); }
       return;
     }
-    setMsg('writing a post');
+    setMsg('writing a post', 'THINKING OF A POST...', 'type');
     var text = '', q = (j.postQueue || []).slice();
     if (q.length) text = q.shift();
     else if (c.aiPosts) {
@@ -164,15 +174,15 @@
     text = String(text || '').replace(/^["'\s]+|["'\s]+$/g, '').slice(0, 270);
     if (!text) { endPhase(j, 'post'); return; }
     jp({ postGuard: t, postQueue: q });
-    await sleep(rnd(1200, 3000));
+    await sl(1200, 3000); say('TYPING MY POST...', 'type');
     if (!(await a.insertText(ed, text))) { endPhase(j, 'post'); return; }
-    await sleep(rnd(2500, 6000));
-    var btn = a.submitBtn(ed);
+    await sl(2500, 6000);
+    var btn = a.submitBtn(ed); say('POSTING NOW', 'reply');
     if (!btn || btn.disabled || btn.getAttribute('aria-disabled') === 'true') { endPhase(j, 'post'); return; }
     await a.tap(btn); await sleep(3500);
     var lp = (j.lastPosts || []).slice(-4).concat(text);
     endPhase(j, 'post', { postsToday: (j.postsToday || 0) + 1, lastPostAt: now(), lastPosts: lp });
-    setMsg('posted');
+    setMsg('posted', 'POSTED!', 'done');
   }
   function postPrompt(c, j) {
     var topic = String(c.aiTopic || '').trim();
@@ -187,14 +197,14 @@
       var left = Math.max(0, (Number(c.followCap) || 25) - (j.cycleFollowed || 0)), ck = pair(c.followChunk, 5, 10), n = Math.min(left, ri(ck[0], ck[1]));
       var chunk = (j.queue || []).slice(0, n);
       if (!chunk.length) { endPhase(j, 'follow'); return; }
-      var gap = pair(c.followGap, 120, 240);
+      var gap = pair(c.followGap, 120, 240); gap = [Math.round(gap[0] * SPD), Math.round(gap[1] * SPD)];
       jp({ running: true, status: 'running', queue: chunk, idx: 0, done: 0, skipped: 0, failed: 0, consec: 0, gapMin: gap[0], gapMax: gap[1],
         followed: [], failedList: [], last: null, startedAt: t, msg: 'Starting', waitUntil: 0, navAt: 0, stepAt: 0 }, 'fjob');
       jp({ fStarted: t, fChunk: chunk.length, fOwned: true, engOwned: true });
       return;
     }
     var fj = jg('fjob');
-    if (fj.running) { setMsg('following ' + ((fj.idx || 0) + 1) + '/' + (j.fChunk || '?')); return; }
+    if (fj.running) { setMsg('following ' + ((fj.idx || 0) + 1) + '/' + (j.fChunk || '?'), 'FOLLOWING ' + ((fj.idx || 0) + 1) + ' OF ' + (j.fChunk || '?'), 'like'); return; }
     var msg = String(fj.msg || ''), done = fj.done || 0, processed = Math.min(j.fChunk || 0, fj.idx || 0);
     var limit = /X limit|failed in a row|logged out/i.test(msg);
     var queue = (j.queue || []).slice(processed), cyc = (j.cycleFollowed || 0) + done, today = (j.followedToday || 0) + done;
@@ -213,17 +223,18 @@
     var a = api(); if (!a) return;
     var j = jg();
     if (!j.running) { if (j.engOwned) stopEngines(true); return; }
-    var c = j.cfg || {}, t = now();
+    var c = j.cfg || {}, t = now(); SPD = speedOf(c);
     if (a.loginWall()) { finish('X logged out - log in again', 'error'); return; }
     var dk = dayKey(t);
     if (j.dayKey !== dk) { jp({ dayKey: dk, followedToday: 0, postsToday: 0 }); return; }
     if (j.restUntil && t < j.restUntil) {
       stopEngines(false);
-      setMsg((j.restWhy === 'limit' ? 'follow limit, resting until ' : j.restWhy === 'cap' ? 'follow cap reached, resting until ' : j.restWhy === 'break' ? 'short break until ' : 'idle until ') + hhmm(j.restUntil));
+      setMsg((j.restWhy === 'limit' ? 'follow limit, resting until ' : j.restWhy === 'cap' ? 'follow cap reached, resting until ' : j.restWhy === 'break' ? 'short break until ' : 'idle until ') + hhmm(j.restUntil),
+        (j.restWhy === 'limit' ? 'LIMIT HIT. REST TILL ' : j.restWhy === 'cap' ? 'ENOUGH FOLLOWS. REST ' : j.restWhy === 'break' ? 'SHORT BREAK TILL ' : 'WAITING TILL ') + hhmm(j.restUntil), 'rest');
       return;
     }
     if (j.restUntil) { jp({ restUntil: 0, restWhy: '', sessionStart: 0, cycleFollowed: j.restWhy === 'limit' || j.restWhy === 'cap' ? 0 : (j.cycleFollowed || 0) }); return; }
-    if (inQuiet(c, t)) { stopEngines(false); setMsg('quiet hours'); return; }
+    if (inQuiet(c, t)) { stopEngines(false); setMsg('quiet hours', 'QUIET HOURS. SLEEPING', 'rest'); return; }
     if (!j.sessionStart) { var sm = pair(c.sessionMin, 40, 90); jp({ sessionStart: t, sessionLen: ri(sm[0], sm[1]) * 60000 }); return; }
     if (!j.phase && t - j.sessionStart > (j.sessionLen || 3600000)) {
       var bm = pair(c.breakMin, 10, 30); jp({ restUntil: t + ri(bm[0], bm[1]) * 60000, restWhy: 'break' }); return;
@@ -234,7 +245,7 @@
       var st = c.steps[pick.step] || {}, mm = pair(st.min, 3, 8), dur = ri(mm[0], mm[1]) * 60000;
       var np = { phase: pick.step, phaseStart: t, phaseEnd: t + Math.max(dur, 60000), navAt: 0, eStarted: 0, fStarted: 0 };
       if (pick.seqIdx != null) np.seqIdx = pick.seqIdx;
-      jp(np); setMsg('next: ' + pick.step); return;
+      jp(np); setMsg('next: ' + pick.step, ({ browse: "I'M GOING TO SCROLL", feed: "LET'S ENGAGE ON FEED", search: "LET'S SEARCH POSTS", profile: 'VISITING MY PROFILE', post: 'TIME TO WRITE A POST', follow: 'FOLLOWING SOME PEOPLE' })[pick.step] || 'NEXT STEP', ({ browse: 'scroll', feed: 'search', search: 'search', profile: 'read', post: 'type', follow: 'like' })[pick.step]); return;
     }
     busy = true;
     try {

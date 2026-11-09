@@ -8,7 +8,7 @@
 
   // ---------------- settings (localStorage of x.com) ----------------
   var CK = 'zenEngCfg', RK = 'zenEngReplied';
-  var DEF = { sea: false, fed: false, auto: false, like: false, likePct: 100, target: false, targetKw: '',
+  var DEF = { cursorFx: false, cursorSkin: 'navy', cursorText: false, sea: false, fed: false, auto: false, like: false, likePct: 100, target: false, targetKw: '',
     tone: 'Smart', style: '', keyword: '', maxRun: 40, paceMin: 4, paceMax: 9,
     ageOn: false, ageMinMin: 0, ageMaxMin: 60, myHandle: '',
     grammar: {}, bigOn: false, bigWords: '', bigTone: 'Smart', customTone: '', customWords: '',
@@ -247,30 +247,123 @@
     pe('pointerdown'); me('mousedown'); pe('pointerup'); me('mouseup'); me('click');
   }
   // ---------------- animated cursor ----------------
-  var cur = null, curHide = null;
+  var cur = null, curHide = null, skFx = null, fxCv = null, chip = null, chipTxt = '', chipHideT = null;
+  function useSkin() { return !!cfg.cursorFx && !!window.ZexCursorFX; }
+  function cursorWanted() { return !!(cfg.cursorFx || cfg.cursorText); }
   function cursorEl() {
-    if (cur && cur.isConnected) return cur;
-    cur = document.createElement('div'); cur.id = 'zeng-cursor';
-    cur.style.cssText = 'position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;z-index:2147483647;pointer-events:none;opacity:0;' +
-      'background:radial-gradient(circle,#fff 0 18%,rgba(167,139,250,.95) 20% 45%,rgba(109,40,217,.35) 48% 100%);box-shadow:0 0 14px 4px rgba(139,92,246,.75);' +
-      'transition:transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
-    cur._x = window.innerWidth / 2; cur._y = window.innerHeight * 0.7; cur.style.transform = 'translate(' + cur._x + 'px,' + cur._y + 'px)';
+    var sk = useSkin();
+    if (cur && cur.isConnected && cur._skin === sk) {
+      if (sk && skFx && cur._skinId !== (cfg.cursorSkin || 'navy')) { cur._skinId = cfg.cursorSkin || 'navy'; skFx.setSkin(cur._skinId); }
+      return cur;
+    }
+    if (cur) { try { cur.remove(); } catch (e) {} }
+    if (skFx) { try { skFx.stop(); } catch (e) {} skFx = null; fxCv = null; }
+    chip = null; chipTxt = '';
+    cur = document.createElement('div'); cur.id = 'zeng-cursor'; cur._skin = sk;
+    if (sk) {
+      cur.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;opacity:0;will-change:transform;transition:transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
+      fxCv = document.createElement('canvas'); fxCv.style.cssText = 'display:block;image-rendering:pixelated;';
+      cur._skinId = cfg.cursorSkin || 'navy';
+      skFx = window.ZexCursorFX.create(fxCv, { skin: cur._skinId, u: 2, bubble: true, arrow: true });
+      cur.appendChild(fxCv); cur.style.width = skFx.width + 'px'; cur.style.height = skFx.height + 'px';
+    } else {
+      cur.style.cssText = 'position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;z-index:2147483647;pointer-events:none;opacity:0;' +
+        'background:radial-gradient(circle,#fff 0 18%,rgba(167,139,250,.95) 20% 45%,rgba(109,40,217,.35) 48% 100%);box-shadow:0 0 14px 4px rgba(139,92,246,.75);' +
+        'transition:transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
+    }
+    cur._x = window.innerWidth / 2; cur._y = window.innerHeight * 0.7; cursorPlace(cur._x, cur._y, '');
     document.documentElement.appendChild(cur); return cur;
+  }
+  // the skin sits right of the pointer; near the right edge it flips to the left (same as the extension)
+  function cursorPlace(x, y, extra) {
+    var c = cur; if (!c) return;
+    if (c._skin && skFx) {
+      var f = (x + skFx.width + 6) > window.innerWidth; skFx.setFlip(f);
+      c.style.transform = 'translate(' + (f ? Math.max(0, x - skFx.width + 1) : x) + 'px,' + y + 'px)' + (extra || '');
+    } else c.style.transform = 'translate(' + x + 'px,' + y + 'px)' + (extra || '');
+    chipPlace();
+  }
+  function cursorShow() { var c = cursorEl(); c.style.opacity = '1'; if (skFx) { try { skFx.start(); } catch (e) {} } return c; }
+  function cursorHide() { if (cur) { cur.style.opacity = '0'; if (skFx) { try { skFx.stop(); } catch (e) {} } } chipHide(); }
+  function cursorJobOn() { try { return !!(jGet('pjob').running || jGet('fjob').running); } catch (e) { return false; } }
+  function cursorTick() {   // called every second: while an engine / Autopilot runs, the cursor stays on screen
+    var want = cursorWanted() && (cfg.auto || cursorJobOn());
+    if (want) { cursorShow(); clearTimeout(curHide); curHide = null; }
+    else if (cur && cur.style.opacity === '1' && !curHide) curHide = setTimeout(function () { curHide = null; cursorHide(); }, 1500);
+  }
+  // ----- status text: skin = its pixel speech bubble, plain cursor = small coloured pill (Engine > Cursor) -----
+  var CHIP_BG = { clicking: '#c2410c', typing: '#a21caf', submitting: '#1d4ed8', thinking: '#0369a1', reading: '#15803d', scrolling: '#4338ca', liking: '#be185d', success: '#047857', resting: '#475569' };
+  var CHIP_POOL = {
+    scroll: ['scrolling', ['Browsing the feed', 'Scrolling through', 'Scanning the timeline']],
+    search: ['reading', ['Looking for something interesting', 'Searching posts']],
+    found: ['reading', ['Reading the tweet', 'Getting the context', 'Taking it in', 'Checking this post']],
+    read: ['thinking', ['Reading the post for AI', 'Thinking about a reply']],
+    like: ['liking', ['Liking this one', 'Tapping the heart']],
+    comment: ['clicking', ['Opening reply box', 'Getting ready to reply']],
+    type: ['typing', ['Crafting a response', 'Writing a reply', 'Finding the right words']],
+    typed: ['reading', ['Reading it over', 'One last look']],
+    reply: ['submitting', ['Posting now', 'Hitting send']],
+    done: ['success', ['Reply posted', 'Done, reply is up']],
+    rest: ['resting', ['Taking a short rest', 'Waiting a bit']]
+  };
+  var chipLast = '';
+  function chipPlace() {
+    if (!chip || !cur || cur._skin) return;
+    var f = (cur._x || 0) > window.innerWidth - 220; chip.style.left = f ? 'auto' : '30px'; chip.style.right = f ? '30px' : 'auto';
+  }
+  function chipHide() { clearTimeout(chipHideT); if (chip) { var c = chip; c.style.opacity = '0'; setTimeout(function () { if (c.style.opacity === '0') c.remove(); }, 300); chip = null; chipTxt = ''; } }
+  function chipPaint(text, look, hold) {
+    if (!cur || cur._skin || cur.style.opacity !== '1' || text === chipTxt) return;
+    chipTxt = text;
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.style.cssText = 'position:absolute;top:3px;white-space:nowrap;padding:3px 9px;border-radius:999px;color:#fff;font:600 11px/1.3 system-ui,sans-serif;opacity:0;transition:opacity .2s;box-shadow:0 2px 8px rgba(0,0,0,.35)';
+      cur.appendChild(chip);
+    }
+    chip.style.backgroundColor = CHIP_BG[look] || '#4338ca'; chip.textContent = text; chipPlace();
+    requestAnimationFrame(function () { if (chip) chip.style.opacity = '1'; });
+    clearTimeout(chipHideT); if (hold) chipHideT = setTimeout(chipHide, hold);
+  }
+  // key = state name (scroll search found read like comment type typed reply done rest)
+  function cursorState(key) {
+    try {
+      if (!cursorWanted() || !cur || cur.style.opacity !== '1') return;
+      if (useSkin()) { if (skFx) skFx.setState(key); return; }
+      var m = CHIP_POOL[key]; if (!m) return;
+      var t = m[1][Math.floor(Math.random() * m[1].length)]; if (m[1].length > 1 && t === chipLast) t = m[1][(m[1].indexOf(t) + 1) % m[1].length];
+      chipLast = t; chipPaint(t, m[0], key === 'done' ? 2500 : 0);
+    } catch (e) {}
+  }
+  // free words (skin: max ~30 letters, A-Z 0-9 only; plain cursor: any text). base = which face / prop the skin shows
+  function cursorSay(text, base, look) {
+    try {
+      if (!cursorWanted()) return;
+      if (!cur || cur.style.opacity !== '1') { if (!(cfg.auto || cursorJobOn())) return; cursorShow(); }
+      if (useSkin()) { if (skFx) skFx.say(text, base || 'read'); return; }
+      chipPaint(String(text), look || (CHIP_POOL[base] || [])[0] || 'reading', 0);
+    } catch (e) {}
+  }
+  function cursorWander() {   // idle drift, like a finger moving around the screen
+    try {
+      if (!cursorWanted() || !cur || cur.style.opacity !== '1') return;
+      var x = rnd(30, window.innerWidth - 80), y = rnd(90, window.innerHeight - 140); cur._x = x; cur._y = y; cursorPlace(x, y, '');
+    } catch (e) {}
   }
   async function moveCursor(el) {
     try {
       var c = cursorEl(), r = el.getBoundingClientRect();
       var x = r.left + r.width / 2 + rnd(-3, 3), y = r.top + r.height / 2 + rnd(-3, 3);
-      c.style.opacity = '1'; c.style.transform = 'translate(' + x + 'px,' + y + 'px)'; c._x = x; c._y = y;
+      c.style.opacity = '1'; if (skFx) { try { skFx.start(); } catch (e) {} }
+      c._x = x; c._y = y; cursorPlace(x, y, '');
       await sleep(480);
-      c.style.transition = 'transform .08s, opacity .25s'; c.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(.7)'; await sleep(90);
-      c.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(1)'; c.style.transition = 'transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
+      c.style.transition = 'transform .08s, opacity .25s'; cursorPlace(x, y, ' scale(.7)'); await sleep(90);
+      cursorPlace(x, y, ' scale(1)'); c.style.transition = 'transform .45s cubic-bezier(.22,.8,.3,1),opacity .25s';
       var rp = document.createElement('div');
       rp.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;border:2px solid #a78bfa;z-index:2147483647;pointer-events:none;transition:all .5s ease-out;opacity:.9';
       document.documentElement.appendChild(rp);
       setTimeout(function () { rp.style.width = '46px'; rp.style.height = '46px'; rp.style.margin = '-23px 0 0 -23px'; rp.style.opacity = '0'; }, 20);
       setTimeout(function () { rp.remove(); }, 600);
-      clearTimeout(curHide); curHide = setTimeout(function () { if (cur) cur.style.opacity = '0'; }, 3500);
+      clearTimeout(curHide); curHide = setTimeout(function () { curHide = null; if (!(cursorWanted() && (cfg.auto || cursorJobOn()))) cursorHide(); }, 3500);
     } catch (e) {}
   }
   async function tap(el) { await moveCursor(el); pointerClick(el); }
@@ -621,7 +714,8 @@
   }
   async function countdown(ms, label) {
     var end = Date.now() + ms;
-    while (cfg.auto) { var left = end - Date.now(); if (left <= 0) break; setStat(label + ' ' + Math.ceil(left / 1000) + 's'); await sleep(Math.min(left, 1000)); }
+    var lastC = 0;
+    while (cfg.auto) { var left = end - Date.now(); if (left <= 0) break; setStat(label + ' ' + Math.ceil(left / 1000) + 's'); if (ms >= 6000 && Date.now() - lastC > 4000) { lastC = Date.now(); if (useSkin()) cursorState('rest'); else cursorSay(label + ' ' + Math.ceil(left / 1000) + 's', 'rest', 'resting'); } await sleep(Math.min(left, 1000)); }
   }
   // everything after a reply lands: "after clicking Reply" wait, optional break, then the gap before the next post
   async function paceWait() {
@@ -751,8 +845,9 @@
     var usedTone = '';
     try {
       setStat('Opening reply');
+      cursorState('found'); if (cursorWanted()) await sleep(rnd(700, 1500));   // the post is being "read": status text stays readable
       if (ecfg(eng, 'Like') && !a.querySelector('[data-testid="unlike"]') && Math.random() * 100 < Number(ecfg(eng, 'LikePct'))) {
-        var lk = a.querySelector('[data-testid="like"]'); if (lk) { await tap(lk); await likeWait(); }
+        var lk = a.querySelector('[data-testid="like"]'); if (lk) { cursorState('like'); await tap(lk); await likeWait(); }
       }
       // Extra Safety 2 (AUTO only): sometimes open the post itself first and reply from its page
       var ar = a;
@@ -771,9 +866,10 @@
           es2Abort(); if (statusPageId()) { history.back(); await waitFor(function () { return statusPageId() === ''; }, 5000); }
         }
       }
+      cursorState('comment');
       var ed = await openReplyBox(ar); if (!ed) throw new Error('Reply box did not open');
       lastEditor = ed;
-      setStat('Generating reply');
+      setStat('Generating reply'); cursorState('read');
       var reply = '';
       if (kwMatch(post)) { reply = cleanReply(shortReply(post, firstName(a))); if (reply) usedTone = 'Keyword'; }   // short keyword post: local short reply, no AI call
       if (!reply) {
@@ -781,12 +877,14 @@
         reply = cleanReply(await gen(post, usedTone, eng)); if (!reply) throw new Error('AI gave an unsafe/empty reply');
       }
       await genWait();
+      cursorState('type');
       if (!(await insertText(ed, reply))) throw new Error('Text did not land in the box');
+      cursorState('typed');
       ourTexts[normT(reply)] = 1;
       var posted = false;
       if (cfg.auto || eng === 'TG') {
         if (eng === 'TG' && !tgGet().running) throw new Error('Stopped');   // Stop pressed while the reply was being written
-        setStat('Posting'); posted = await postReply(liveEditor() || ed);
+        setStat('Posting'); cursorState('reply'); posted = await postReply(liveEditor() || ed); if (posted) cursorState('done');
       }
       btn.textContent = 'DONE'; btn.classList.add('zen-done'); btn.style.opacity = '.6';
       if (posted) { markReplied(sid, eng); stat.done++; }
@@ -952,7 +1050,7 @@
     folBusy = true; var outcome = 'failed', why = '';
     var wanted = function () { var q = jGet('fjob'); return !!q.running && (q.queue || [])[q.idx || 0] === u; };
     try {
-      jPatch('fjob', { msg: 'Following @' + u }); setStat('FOLLOW - @' + u);
+      jPatch('fjob', { msg: 'Following @' + u }); setStat('FOLLOW - @' + u); cursorSay('Following @' + u, 'like', 'clicking');
       await sleep(rnd(1500, 2500)); if (!wanted()) return;
       if (folDoneOrUnavailable()) outcome = 'already';
       else {
@@ -1153,7 +1251,7 @@
             if (!cfg.auto) break;
             emptyReloads++; writeRun({ empty: emptyReloads }); reloading = true; location.reload(); return;
           }
-          setStat('Scrolling for new posts'); var prev = postIds(); await scrollDown(); await waitMore(prev); await sleep(1200); continue;
+          setStat('Scrolling for new posts'); cursorState('scroll'); var prev = postIds(); await scrollDown(); await waitMore(prev); await sleep(1200); continue;
         }
         none = 0;
         var btn = target.querySelector('.' + cls);
@@ -1276,11 +1374,12 @@
 
   // small API for pilot.js (Autopilot)
   window.__ZAPI = { sleep: sleep, rnd: rnd, toast: toast, setStat: setStat, patchCfg: patchCfg, getCfg: loadCfg, ownHandle: ownHandle, tap: tap,
-    insertText: insertText, submitBtn: submitBtn, loginWall: loginWall, genRaw: genRaw };
+    insertText: insertText, submitBtn: submitBtn, loginWall: loginWall, genRaw: genRaw,
+    cursorSay: cursorSay, cursorState: cursorState, cursorWander: cursorWander };
   function boot() {
     es1Check();
     buildPanel();
-    setInterval(function () { try { buildPanel(); scan(); renderPanel(); placeUi(); } catch (e) {} }, 1000);
+    setInterval(function () { try { buildPanel(); scan(); renderPanel(); placeUi(); cursorTick(); } catch (e) {} }, 1000);
     try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', placeUi); window.visualViewport.addEventListener('scroll', placeUi); } } catch (e) {}
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
