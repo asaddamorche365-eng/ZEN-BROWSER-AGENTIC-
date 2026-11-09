@@ -17705,14 +17705,41 @@ function zrcMakeHud(host, title, withCmd, opts) {
       agentCard('tgsw', 'TG Sweep', 'Collect X links from a Telegram chat, reply to all', (tgJob().running && tgJob().mode === 'sweep') ? 'ON' : 'OFF') +
       agentCard('fol', 'Follow Engine', 'Follow a list of usernames, one by one', fuJob('fjob').running ? 'ON' : 'OFF') +
       agentCard('unf', 'Auto Unfollow', 'Unfollow people who do not follow you back', fuJob('ujob').running ? 'ON' : 'OFF') +
+      vCursorCard() +
       '<div class="zp-card" style="margin-top:14px"><div class="zp-lbl">ACCOUNT</div>' +
       row('My @handle', 'optional, detected automatically. Own posts are always skipped.', '<input class="zp-in" id="f-myHandle" style="width:140px" value="' + esc(cfg.myHandle) + '">') + '</div>' +
       '<div class="zp-note">Start / Stop is the floating <b>Z</b> button inside X. Tone, grammar, big reply and style are in the Settings sheet.</div>';
   }
+  // ----- CURSOR (animated pixel cursor + status text, same as the extension; drawn inside X by x.js) -----
+  var cpFx = null;
+  function vCursorCard() {
+    var skins = (window.ZexCursorFX && window.ZexCursorFX.SKINS) || [], cur = cfg.cursorSkin || 'navy', chips = '';
+    skins.forEach(function (k) {
+      chips += '<button type="button" class="zp-chip' + (k.id === cur ? ' gold' : '') + '" data-skin="' + k.id + '" style="min-width:64px">' + esc(k.name) + '</button>';
+    });
+    return '<div class="zp-card" style="margin-top:14px"><div class="zp-lbl">CURSOR</div>' +
+      row('Animated cursor', 'a small character follows the work and talks in a speech bubble (scrolling, reading, liking, typing, resting...). OFF = plain dot.', '<label class="zp-sw"><input type="checkbox" id="f-cursorFx"' + (cfg.cursorFx ? ' checked' : '') + '><i></i></label>') +
+      (skins.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">' + chips + '</div><canvas id="cur-prev" style="display:block;image-rendering:pixelated;margin:4px 0"></canvas>' : '') +
+      row('Status text', 'with the plain dot: a small label says what it is doing (reading the tweet, typing, posting, resting...)', '<label class="zp-sw"><input type="checkbox" id="f-cursorText"' + (cfg.cursorText ? ' checked' : '') + '><i></i></label>') +
+      '<div class="zp-note">Shown while an engine or Autopilot runs. Animation uses a little more battery, switch it OFF if the phone gets warm.</div></div>';
+  }
+  function cursorBind(el) {
+    bindCheck(el, 'f-cursorFx', 'cursorFx'); bindCheck(el, 'f-cursorText', 'cursorText');
+    if (cpFx) { try { cpFx.stop(); } catch (e) {} cpFx = null; }
+    var cv = el.querySelector('#cur-prev');
+    if (cv && window.ZexCursorFX) {
+      cpFx = window.ZexCursorFX.create(cv, { skin: cfg.cursorSkin || 'navy', u: 2, bubble: true, arrow: true }); cpFx.start();
+      var keys = ['scroll', 'found', 'like', 'type', 'rest'], ki = 0; cpFx.setState('scroll', true);
+      cv._iv = setInterval(function () { if (!cv.isConnected) { clearInterval(cv._iv); try { cpFx.stop(); } catch (e) {} return; } ki = (ki + 1) % keys.length; try { cpFx.setState(keys[ki], true); } catch (e) {} }, 3000);
+    }
+    [].forEach.call(el.querySelectorAll('[data-skin]'), function (b) {
+      b.onclick = function () { var id = b.getAttribute('data-skin'); save({ cursorSkin: id }); if (cpFx) cpFx.setSkin(id); [].forEach.call(el.querySelectorAll('[data-skin]'), function (o) { o.classList.toggle('gold', o === b); }); };
+    });
+  }
   // ----- AUTOPILOT (human-like routine: the run itself lives in x.js / pilot.js, state in job store "pjob") -----
   IC.pilot = '<svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.2L18.5 21 12 16.8 5.5 21l2-7.8L2 9h7z"/></svg>';
   var PSTEPS = [['browse', 'Scroll feed', 'time'], ['feed', 'Engage on feed (FED)', 'count'], ['search', 'Search + engage (SEA)', 'count'], ['profile', 'Visit own profile', 'time'], ['post', 'Write a post', ''], ['follow', 'Follow people', '']];
-  var PDEF = { mode: 'brain', orderStr: 'browse,feed,profile,post,search,follow',
+  var PDEF = { speed: 'normal', speedMul: 1, mode: 'brain', orderStr: 'browse,feed,profile,post,search,follow',
     steps: { browse: { on: true, w: 3, min: 3, max: 8, skip: 0 }, feed: { on: true, w: 3, cnt: [5, 12], skip: 0 }, search: { on: true, w: 2, cnt: [4, 10], skip: 10 },
       profile: { on: true, w: 1, min: 1, max: 3, skip: 20 }, post: { on: false, w: 1, skip: 30 }, follow: { on: true, w: 2, skip: 0 } },
     followCap: 25, dayFollowMax: 80, followChunk: [5, 10], followGap: [120, 240], restHours: [3, 4], sessionMin: [40, 90], breakMin: [10, 30],
@@ -17745,7 +17772,11 @@ function zrcMakeHud(host, title, withCmd, opts) {
     h += '<div class="zp-card"><div class="zp-lbl">AUTOPILOT</div><div class="zp-note">Runs the engines like a person: scrolls the feed, opens your profile, posts, searches and engages, follows people, takes short breaks, and rests for hours after a follow limit. Every step, order, time and number below is yours to change.</div></div>' +
       '<div class="zp-card" id="pl-stat">' + pilotStatHtml() + '</div>' +
       '<div class="zp-card"><div style="display:flex;gap:8px"><button type="button" class="zp-chip gold" id="pl-start" style="flex:1">START</button><button type="button" class="zp-chip" id="pl-stop" style="flex:1">STOP</button></div></div>';
-    h += '<div class="zp-card"><div class="zp-lbl">HOW IT DECIDES</div>' +
+    h += '<div class="zp-card"><div class="zp-lbl">SPEED</div>' +
+      row('Autopilot speed', 'how fast it scrolls, pauses, types and spaces its follows. Reply speed of FED / SEA stays in Timing.',
+        '<select class="zp-in" data-pk="speed" style="width:130px"><option value="slow"' + (c.speed === 'slow' ? ' selected' : '') + '>Slow</option><option value="normal"' + (c.speed === 'normal' ? ' selected' : '') + '>Normal</option><option value="fast"' + (c.speed === 'fast' ? ' selected' : '') + '>Fast</option><option value="custom"' + (c.speed === 'custom' ? ' selected' : '') + '>Custom</option></select>') +
+      (c.speed === 'custom' ? row('Custom multiplier', '1 = normal, 2 = twice as slow, 0.5 = twice as fast (0.3 to 4)', pnum('speedMul', 70)) : '') + '</div>' +
+      '<div class="zp-card"><div class="zp-lbl">HOW IT DECIDES</div>' +
       row('Next step chosen by', 'Brain = offline rules (weights, what was not done for long, no repeats). Random = weights only. Fixed = your order.',
         '<select class="zp-in" data-pk="mode" style="width:130px"><option value="brain"' + (c.mode === 'brain' ? ' selected' : '') + '>Brain</option><option value="random"' + (c.mode === 'random' ? ' selected' : '') + '>Random</option><option value="sequence"' + (c.mode === 'sequence' ? ' selected' : '') + '>Fixed order</option></select>') +
       (c.mode === 'sequence' ? row('Order', 'comma separated: browse, feed, search, profile, post, follow', '<input class="zp-in" data-pk="orderStr" style="width:170px" value="' + esc(c.orderStr) + '">') : '') + '</div>';
@@ -17774,7 +17805,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
       e.onchange = function () {
         var k = e.getAttribute('data-pk'), v;
         if (e.type === 'checkbox') v = e.checked; else if (e.type === 'number') { v = Number(e.value); if (!isFinite(v) || v < 0) return; } else v = e.value;
-        pset(k, v); if (k === 'mode') { render(); }
+        pset(k, v); if (k === 'mode' || k === 'speed') { render(); }
       };
     });
     var st = el.querySelector('#pl-start'), sp = el.querySelector('#pl-stop');
@@ -17798,6 +17829,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
     el.innerHTML = '<div class="zp-wrap">' + (view === 'home' ? '<div class="zp-h">Engine</div><div class="zp-sub">FED · SEA · TG · Follow · Unfollow · Timing — keys &amp; profile are in Menu → Profile</div>' : '') + body + '</div>';
     wire(el);
     if (view === 'pilot') pilotBind(el);
+    if (view === 'home') cursorBind(el);
     if (view === 'sea') renderQs();
   }
   function bindCheck(el, id, key, after) { var e = el.querySelector('#' + id); if (e) e.onchange = function () { var p = {}; p[key] = e.checked; save(p); if (after) after(); }; }
@@ -17968,6 +18000,7 @@ function zrcMakeHud(host, title, withCmd, opts) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 50); }); else setTimeout(boot, 50);
 })();
 </script>
+<script src="cursor_skins.js"></script>
 <script src="z1-ui.js"></script>
 </body>
 </html>
