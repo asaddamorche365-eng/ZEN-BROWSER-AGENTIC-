@@ -176,6 +176,7 @@ class MainActivity : Activity() {
         listOf(
             UserScript("scripts/chromefix.js", setOf("*")),
             UserScript("scripts/all.js", setOf("*")),
+            UserScript("scripts/cursor_skins.js", setOf("https://x.com", "https://twitter.com")),
             UserScript("scripts/cdp.js", setOf("https://x.com", "https://twitter.com", "https://web.telegram.org")),
             UserScript("scripts/x.js", setOf("https://x.com", "https://twitter.com")),
             UserScript("scripts/pilot.js", setOf("https://x.com", "https://twitter.com")),
@@ -1224,7 +1225,7 @@ class MainActivity : Activity() {
         "seaEs2", "seaEs2Pct", "fedEs2", "fedEs2Pct",
         "kwAuto", "kwCustomOn", "kwCustom", "kwMode", "blackList", "whiteList",
         "tgLike", "tgLikePct",
-        "folSpeed", "folMin", "folMax", "unfMode", "unfLimit", "unfMin", "unfMax", "unfBreakEvery", "unfBreakSec")
+        "cursorFx", "cursorSkin", "cursorText", "folSpeed", "folMin", "folMax", "unfMode", "unfLimit", "unfMin", "unfMax", "unfBreakEvery", "unfBreakSec")
 
     private fun engCfgGetStr(): String = engPrefs().getString("cfg", "{}") ?: "{}"
 
